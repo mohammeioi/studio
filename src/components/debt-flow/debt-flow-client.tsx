@@ -184,7 +184,7 @@ export const DebtManager = () => {
     });
     return () => unsubscribe();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchDataFromLocalStorage]);
+  }, [fetchDataFromLocalStorage, fetchDataFromFirestore]);
 
   // Filter debt records
   useEffect(() => {
@@ -225,15 +225,15 @@ export const DebtManager = () => {
       if (user) { // Firestore
         const docRef = doc(db, "users", user.uid, "names", newNameEntry.id);
         await setDoc(docRef, newNameEntry);
+        // Re-fetch data from Firestore to ensure UI is in sync
+        await fetchDataFromFirestore(user.uid);
       } else { // LocalStorage
         const updatedNames = [...localNames, newNameEntry];
         localStorage.setItem('debt-manager-local-names', JSON.stringify(updatedNames));
+        // Manually update state for local storage
+        setLocalNames(updatedNames);
       }
   
-      // Update state and clear search/input fields
-      const updatedList = [...localNames, newNameEntry];
-      setLocalNames(updatedList);
-      setFilteredLocalNames(updatedList);
       setNewLocalName("");
       setLocalSearchTerm(""); 
       toast({ title: "تم الإضافة", description: `تم إضافة ${nameToAdd} للقائمة` });
