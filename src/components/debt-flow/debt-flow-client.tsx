@@ -58,7 +58,7 @@ export const DebtManager = () => {
   const [filteredRecords, setFilteredRecords] = useState<DebtRecord[]>([]);
   const [selectedDebtor, setSelectedDebtor] = useState<string | null>(null);
   
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // Start with loading true
   const [isSyncing, setIsSyncing] = useState(false);
   
   const [plan, setPlan] = useState<SuggestPaymentPlanOutput | null>(null);
@@ -78,15 +78,13 @@ export const DebtManager = () => {
 
   // --- Auth State & Data Fetching Logic ---
   useEffect(() => {
-    setLoading(true);
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (!currentUser) {
-        // Logged out, load from localStorage
         fetchDataFromLocalStorage();
-        setLoading(false);
+        setLoading(false); // Stop loading when user is confirmed logged out
       }
-      // If logged in, data will be fetched by the real-time listeners below
+      // If logged in, the Firestore useEffect will handle the loading state.
     });
     return () => unsubscribe();
   }, []);
@@ -95,12 +93,21 @@ export const DebtManager = () => {
   useEffect(() => {
     if (user) {
       setLoading(true);
+      let namesLoaded = false;
+      let debtsLoaded = false;
+
+      const stopLoadingIfReady = () => {
+        if (namesLoaded && debtsLoaded) {
+          setLoading(false);
+        }
+      };
       
       const namesQuery = query(collection(db, "users", user.uid, "localNames"));
       const unsubscribeNames = onSnapshot(namesQuery, (querySnapshot) => {
         const namesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LocalName));
         setLocalNames(namesData);
-        if(loading) setLoading(false);
+        namesLoaded = true;
+        stopLoadingIfReady();
       }, (error) => {
         console.error("Error fetching local names from Firestore:", error);
         toast({ title: "خطأ", description: "حدث خطأ في تحميل قائمة الأسماء.", variant: "destructive" });
@@ -111,7 +118,8 @@ export const DebtManager = () => {
       const unsubscribeDebts = onSnapshot(debtsQuery, (querySnapshot) => {
         const debtData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DebtRecord));
         setDebtRecords(debtData.sort((a, b) => b.amount - a.amount));
-        if(loading) setLoading(false);
+        debtsLoaded = true;
+        stopLoadingIfReady();
       }, (error) => {
         console.error("Error fetching debt records from Firestore:", error);
         toast({ title: "خطأ", description: "حدث خطأ في تحميل سجلات الديون.", variant: "destructive" });
@@ -186,6 +194,7 @@ export const DebtManager = () => {
   };
   
   const handleAuthSuccess = async (newUser: User) => {
+    setUser(newUser);
     const localDebts = localStorage.getItem('debt-manager-records');
     const localNames = localStorage.getItem('debt-manager-local-names');
     if ((localDebts && JSON.parse(localDebts).length > 0) || (localNames && JSON.parse(localNames).length > 0)) {
@@ -198,6 +207,8 @@ export const DebtManager = () => {
     setDebtorName("");
     setAmount("");
     await signOut(auth);
+    setDebtRecords([]); // Clear data on logout
+    setLocalNames([]); // Clear data on logout
     toast({ title: "تم تسجيل الخروج بنجاح" });
   };
   
@@ -267,7 +278,7 @@ export const DebtManager = () => {
       return toast({ title: "خطأ", description: "يرجى إدخال اسم ومبلغ صحيحين.", variant: "destructive" });
     }
     
-    setLoading(true);
+    // setLoading(true); // Don't use global loading for this quick operation
     
     try {
         const existingRecord = debtRecords.find(r => r.debtor_name === name);
@@ -306,7 +317,7 @@ export const DebtManager = () => {
         console.error("Error updating debt:", error);
         toast({ title: "خطأ", description: error.message || "فشلت عملية تحديث الدين.", variant: "destructive" });
     } finally {
-        setLoading(false);
+        // setLoading(false);
     }
   };
   
@@ -333,12 +344,9 @@ export const DebtManager = () => {
 
   const refreshData = useCallback(() => {
     if (user) {
-        // With real-time listeners, a manual refresh isn't strictly necessary, 
-        // but we can re-trigger loading state to give user feedback.
         setLoading(true);
         // Data will refresh automatically from listeners.
-        // We can add a small delay to simulate fetching.
-        setTimeout(() => setLoading(false), 500);
+        // We can add a small delay to simulate fetching, which is now handled by the improved logic.
     } else {
         setLoading(true);
         fetchDataFromLocalStorage();
@@ -346,6 +354,15 @@ export const DebtManager = () => {
     }
     toast({ title: "تم التحديث", description: "تم تحديث البيانات بنجاح." });
   }, [user]);
+
+  if (loading) {
+    return (
+        <div className="flex flex-col items-center justify-center min-h-screen bg-background">
+            <RefreshCw className="h-12 w-12 animate-spin text-primary" />
+            <p className="mt-4 text-lg text-muted-foreground">جاري تحميل البيانات...</p>
+        </div>
+    );
+  }
 
   return (
     <div dir="rtl" className="p-4">
@@ -413,14 +430,14 @@ export const DebtManager = () => {
                   <Button
                     onClick={() => recordOrPayDebt(true)}
                     className="bg-success hover:bg-success/90 text-success-foreground font-semibold py-2"
-                    disabled={loading || isSyncing}
+                    disabled={isSyncing}
                   >
                     تسديد الدين
                   </Button>
                   <Button
                     onClick={() => recordOrPayDebt(false)}
                     className="bg-debt-accent hover:bg-debt-accent/90 text-white font-semibold py-2"
-                    disabled={loading || isSyncing}
+                    disabled={isSyncing}
                   >
                     تسجيل دين
                   </Button>
@@ -431,14 +448,14 @@ export const DebtManager = () => {
                       onClick={refreshData}
                       variant="outline"
                       className="w-full py-2 font-semibold"
-                      disabled={loading || isSyncing}
+                      disabled={isSyncing}
                     >
-                      <RefreshCw className={`h-5 w-5 ml-2 ${(loading || isSyncing) ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`h-5 w-5 ml-2 ${isSyncing ? 'animate-spin' : ''}`} />
                       تحديث القائمة
                     </Button>
                     <Button
                       onClick={handleSuggestPlan}
-                      disabled={!selectedDebtorRecord || loading || isGeneratingPlan || isSyncing}
+                      disabled={!selectedDebtorRecord || isGeneratingPlan || isSyncing}
                       variant="outline"
                       className="w-full py-2 font-semibold border-primary/50 text-primary hover:bg-primary/10"
                     >
@@ -465,10 +482,10 @@ export const DebtManager = () => {
                     className="pr-10"
                   />
                 </div>
-                {(loading || isSyncing) ? (
+                {isSyncing ? (
                     <div className="text-center py-8">
                         <RefreshCw className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
-                        <p className="mt-2 text-muted-foreground">{isSyncing ? 'جاري المزامنة...' : 'جاري التحميل...'}</p>
+                        <p className="mt-2 text-muted-foreground">جاري المزامنة...</p>
                     </div>
                 ) : (
                   <div className="max-h-40 overflow-y-auto p-2 border rounded-lg bg-background/50 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -530,7 +547,7 @@ export const DebtManager = () => {
                     variant="outline"
                     size="sm"
                     className="w-full"
-                    disabled={loading || isSyncing}
+                    disabled={isSyncing}
                   >
                     <Plus className="h-4 w-4 ml-1" />
                     إضافة للقائمة
@@ -571,7 +588,7 @@ export const DebtManager = () => {
                                 removeLocalName(localName.id);
                               }}
                               className="h-6 w-6 p-0 hover:bg-destructive hover:text-destructive-foreground"
-                              disabled={loading || isSyncing}
+                              disabled={isSyncing}
                             >
                               <X className="h-4 w-4" />
                             </Button>
