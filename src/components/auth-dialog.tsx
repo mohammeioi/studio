@@ -6,6 +6,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   getAuth,
+  updateProfile,
 } from "firebase/auth";
 import { app } from "@/lib/firebase"; // Ensure firebase is initialized
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ const auth = getAuth(app);
 
 export const AuthDialog = ({ open, onOpenChange, onAuthSuccess }: AuthDialogProps) => {
   const { toast } = useToast();
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -40,7 +42,17 @@ export const AuthDialog = ({ open, onOpenChange, onAuthSuccess }: AuthDialogProp
     setLoading(true);
     try {
       if (isSignUp) {
-        await createUserWithEmailAndPassword(auth, email, password);
+        if (!name.trim()) {
+            toast({
+                title: "خطأ",
+                description: "يرجى إدخال اسمك.",
+                variant: "destructive",
+            });
+            setLoading(false);
+            return;
+        }
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(userCredential.user, { displayName: name });
         toast({
           title: "تم إنشاء الحساب",
           description: "تم تسجيل دخولك بنجاح.",
@@ -124,6 +136,19 @@ export const AuthDialog = ({ open, onOpenChange, onAuthSuccess }: AuthDialogProp
           </TabsContent>
           <TabsContent value="signup">
             <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="name-signup" className="text-right">
+                    الاسم
+                </Label>
+                <Input
+                    id="name-signup"
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="col-span-3"
+                    placeholder="اسمك الكامل"
+                />
+              </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="email-signup" className="text-right">
                   البريد

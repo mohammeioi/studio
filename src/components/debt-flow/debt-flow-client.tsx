@@ -67,6 +67,11 @@ export const DebtManager = () => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setLoading(true);
       setUser(currentUser);
+      if (!currentUser) {
+        // If logged out, clear all data
+        setDebtRecords([]);
+        setLocalNames([]);
+      }
       setLoading(false);
     });
     return () => unsubscribe();
@@ -74,8 +79,6 @@ export const DebtManager = () => {
 
   const handleLogout = async () => {
     await signOut(auth);
-    setDebtRecords([]);
-    setLocalNames([]);
     toast({ title: "تم تسجيل الخروج بنجاح" });
   };
 
@@ -105,6 +108,8 @@ export const DebtManager = () => {
 
   // Initial data fetch
   useEffect(() => {
+    // We will switch to firestore fetching later
+    // For now, local storage is used for simplicity
     fetchData();
   }, [fetchData, user]);
 
@@ -308,7 +313,7 @@ export const DebtManager = () => {
                   {user ? (
                       <>
                           <UserIcon className="h-5 w-5 text-green-400" />
-                          <span>{user.email}</span>
+                          <span>{user.displayName || user.email}</span>
                       </>
                   ) : (
                       <span>وضع عدم الاتصال</span>
