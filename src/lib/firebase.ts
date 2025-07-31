@@ -1,6 +1,7 @@
-// This file is no longer used for auth or firestore but is kept for potential future use with other Firebase services.
-// If no other firebase services are needed, this file can be deleted.
+
 import { initializeApp, getApps, getApp } from "firebase/app";
+import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
   "projectId": "debtflow-a5qmc",
@@ -14,5 +15,22 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+const db = getFirestore(app);
+const auth = getAuth(app);
 
-export { app };
+// Enable offline persistence
+try {
+    enableIndexedDbPersistence(db)
+      .then(() => console.log("Firebase Offline persistence enabled"))
+      .catch((err) => {
+        if (err.code == 'failed-precondition') {
+          console.warn("Multiple tabs open, offline persistence will only be enabled in one tab.");
+        } else if (err.code == 'unimplemented') {
+          console.warn("The current browser does not support all of the features required to enable persistence.");
+        }
+      });
+} catch (error) {
+    console.error("Error enabling offline persistence: ", error);
+}
+
+export { app, db, auth };

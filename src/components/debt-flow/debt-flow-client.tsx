@@ -1,8 +1,9 @@
 
-// src/components/debt-flow/debt-flow-client.tsx
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getAuth, onAuthStateChanged, signOut, User } from "firebase/auth";
+import { app } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,8 +16,11 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Plus, Home, RefreshCw, X, Lightbulb } from "lucide-react";
+import { Search, Plus, User as UserIcon, LogOut, LogIn, RefreshCw, X, Lightbulb } from "lucide-react";
 import { suggestPaymentPlan, SuggestPaymentPlanOutput } from "@/ai/flows/suggest-payment-plan";
+import { AuthDialog } from "@/components/auth-dialog";
+import { ThemeToggle } from "../theme-toggle";
+
 
 interface DebtRecord {
   id: string;
@@ -29,15 +33,19 @@ interface LocalName {
     name: string;
 }
 
+const auth = getAuth(app);
+
 export const DebtManager = () => {
   const { toast } = useToast();
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
   const [debtorName, setDebtorName] = useState("");
   const [amount, setAmount] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [debtRecords, setDebtRecords] = useState<DebtRecord[]>([]);
   const [filteredRecords, setFilteredRecords] = useState<DebtRecord[]>([]);
   const [selectedDebtor, setSelectedDebtor] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   
   const [plan, setPlan] = useState<SuggestPaymentPlanOutput | null>(null);
   const [isPlanDialogOpen, setIsPlanDialogOpen] = useState(false);
@@ -53,9 +61,30 @@ export const DebtManager = () => {
   const [localSearchTerm, setLocalSearchTerm] = useState("");
   const [filteredLocalNames, setFilteredLocalNames] = useState<LocalName[]>([]);
 
+
+  // --- Auth State ---
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setLoading(true);
+      setUser(currentUser);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    setDebtRecords([]);
+    setLocalNames([]);
+    toast({ title: "تم تسجيل الخروج بنجاح" });
+  };
+
+
   // --- Data Fetching Logic ---
-  const fetchDataFromLocalStorage = useCallback(() => {
+  const fetchData = useCallback(() => {
     setLoading(true);
+    // TODO: Implement Firestore fetching when user is logged in
+    // For now, we will use localStorage for both cases until the hook is ready.
     try {
       const savedDebts = localStorage.getItem('debt-manager-records');
       const savedNames = localStorage.getItem('debt-manager-local-names');
@@ -76,8 +105,8 @@ export const DebtManager = () => {
 
   // Initial data fetch
   useEffect(() => {
-    fetchDataFromLocalStorage();
-  }, [fetchDataFromLocalStorage]);
+    fetchData();
+  }, [fetchData, user]);
 
 
   // Filter debt records
@@ -114,7 +143,8 @@ export const DebtManager = () => {
       id: `${Date.now()}-${nameToAdd.replace(/\s+/g, '-')}`,
       name: nameToAdd,
     };
-  
+    
+    // TODO: Add to Firestore if user is logged in
     const updatedNames = [...localNames, newNameEntry];
     localStorage.setItem('debt-manager-local-names', JSON.stringify(updatedNames));
     setLocalNames(updatedNames);
@@ -127,7 +157,7 @@ export const DebtManager = () => {
   // Remove local name
   const removeLocalName = async (nameId: string) => {
     const nameToRemove = localNames.find(n => n.id === nameId)?.name || nameId;
-    
+    // TODO: Remove from Firestore if user is logged in
     const updatedNames = localNames.filter(n => n.id !== nameId);
     localStorage.setItem('debt-manager-local-names', JSON.stringify(updatedNames));
     setLocalNames(updatedNames);
@@ -167,10 +197,10 @@ export const DebtManager = () => {
             return;
         }
         
-        const recordId = name; // Use name as the ID
+        const recordId = name; 
         const newRecord: DebtRecord = { id: recordId, debtor_name: name, amount: newAmount };
 
-        
+        // TODO: Update Firestore if user is logged in
         let updatedRecords = debtRecords.filter(r => r.id !== recordId);
         if (newAmount > 0) {
             updatedRecords.push(newRecord);
@@ -213,9 +243,6 @@ export const DebtManager = () => {
   const selectedDebtorRecord = selectedDebtor 
     ? debtRecords.find(s => s.debtor_name === selectedDebtor)
     : null;
-    
-  const dataStatusIcon = <Home className="h-5 w-5 text-green-400" title="البيانات مخزنة محلياً" />;
-
 
   const handleSuggestPlan = async () => {
     if (!selectedDebtorRecord) {
@@ -252,6 +279,22 @@ export const DebtManager = () => {
 
   return (
     <div dir="rtl" className="p-4">
+      <AuthDialog open={isAuthDialogOpen} onOpenChange={setIsAuthDialogOpen} onAuthSuccess={fetchData} />
+      <div className="absolute top-4 left-4 z-50 flex gap-2">
+        <ThemeToggle />
+        {user ? (
+            <Button variant="outline" size="icon" onClick={handleLogout} className="bg-card/80 backdrop-blur-sm shadow-lg border-white/20 dark:border-white/10">
+                <LogOut />
+                <span className="sr-only">تسجيل الخروج</span>
+            </Button>
+        ) : (
+            <Button variant="outline" size="icon" onClick={() => setIsAuthDialogOpen(true)} className="bg-card/80 backdrop-blur-sm shadow-lg border-white/20 dark:border-white/10">
+                <LogIn />
+                <span className="sr-only">تسجيل الدخول</span>
+            </Button>
+        )}
+      </div>
+
       <div className="max-w-6xl mx-auto w-full">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full">
           
@@ -259,9 +302,18 @@ export const DebtManager = () => {
             <Card className="bg-card shadow-lg">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="text-2xl font-bold text-foreground flex items-center gap-2">
-                  {dataStatusIcon}
                   نظام إدارة الديون
                 </CardTitle>
+                <div className="text-sm text-muted-foreground flex items-center gap-2">
+                  {user ? (
+                      <>
+                          <UserIcon className="h-5 w-5 text-green-400" />
+                          <span>{user.email}</span>
+                      </>
+                  ) : (
+                      <span>وضع عدم الاتصال</span>
+                  )}
+                </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 {selectedDebtorRecord && (
@@ -308,7 +360,7 @@ export const DebtManager = () => {
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Button
-                      onClick={() => fetchDataFromLocalStorage()}
+                      onClick={() => fetchData()}
                       variant="outline"
                       className="w-full py-2 font-semibold"
                       disabled={loading}
@@ -355,7 +407,7 @@ export const DebtManager = () => {
                     {filteredRecords.length > 0 ? (
                         filteredRecords.map((record) => (
                           <Card
-                            key={record.debtor_name}
+                            key={record.id}
                             className={`cursor-pointer transition-all hover:scale-105 hover:shadow-lg ${
                               selectedDebtor === record.debtor_name 
                                 ? 'bg-debt-accent text-white border-debt-accent' 
