@@ -2,7 +2,7 @@
 // src/components/debt-flow/debt-flow-client.tsx
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,14 +15,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Plus, Home, RefreshCw, X, LogIn, LogOut, UserPlus, Cloud, Lightbulb } from "lucide-react";
+import { Search, Plus, Home, RefreshCw, X, Lightbulb } from "lucide-react";
 import { suggestPaymentPlan, SuggestPaymentPlanOutput } from "@/ai/flows/suggest-payment-plan";
-
-
-import { AuthDialog } from "@/components/auth-dialog";
-import { auth, db } from "@/lib/firebase";
-import type { User } from "firebase/auth";
-import { doc, getDoc, setDoc, collection, getDocs, writeBatch, deleteDoc } from "firebase/firestore";
 
 interface DebtRecord {
   id: string;
@@ -44,11 +38,6 @@ export const DebtManager = () => {
   const [filteredRecords, setFilteredRecords] = useState<DebtRecord[]>([]);
   const [selectedDebtor, setSelectedDebtor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  
-  const [user, setUser] = useState<User | null>(null);
-  const [authDialogOpen, setAuthDialogOpen] = useState(false);
-  const [authDialogMode, setAuthDialogMode] = useState<'login' | 'signup'>('login');
-  const [isSyncing, setIsSyncing] = useState(false);
   
   const [plan, setPlan] = useState<SuggestPaymentPlanOutput | null>(null);
   const [isPlanDialogOpen, setIsPlanDialogOpen] = useState(false);
@@ -85,106 +74,11 @@ export const DebtManager = () => {
     }
   }, [toast]);
 
-  const fetchDataFromFirestore = useCallback(async (userId: string) => {
-    setLoading(true);
-    try {
-        const debtsColRef = collection(db, "users", userId, "debts");
-        const namesColRef = collection(db, "users", userId, "names");
-        
-        const debtSnapshot = await getDocs(debtsColRef);
-        const nameSnapshot = await getDocs(namesColRef);
-
-        const debtData = debtSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DebtRecord));
-        const namesData = nameSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LocalName));
-
-        setDebtRecords(debtData.sort((a, b) => b.amount - a.amount));
-        setLocalNames(namesData);
-
-    } catch (error) {
-        console.error('Error fetching data from Firestore:', error);
-        toast({ title: "خطأ", description: "فشل تحميل البيانات من السحابة.", variant: "destructive" });
-    } finally {
-        setLoading(false);
-    }
-  }, [toast]);
-
-  const mergeLocalAndFirestoreData = async (userId: string) => {
-    setIsSyncing(true);
-    toast({ title: "جاري المزامنة...", description: "دمج البيانات المحلية مع السحابة." });
-    try {
-        const localDebts: DebtRecord[] = JSON.parse(localStorage.getItem('debt-manager-records') || '[]');
-        const localNames: LocalName[] = JSON.parse(localStorage.getItem('debt-manager-local-names') || '[]');
-
-        if (localDebts.length === 0 && localNames.length === 0) {
-            await fetchDataFromFirestore(userId);
-            setIsSyncing(false);
-            return;
-        }
-
-        const batch = writeBatch(db);
-        const firestoreDebtsRef = collection(db, "users", userId, "debts");
-        const firestoreDebtsSnapshot = await getDocs(firestoreDebtsRef);
-        const firestoreDebts = firestoreDebtsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DebtRecord));
-
-        // Merge Debts
-        localDebts.forEach(localDebt => {
-            if (!localDebt.id) return; // Skip invalid records
-            const firestoreDebt = firestoreDebts.find(d => d.id === localDebt.id);
-            const docRef = doc(db, "users", userId, "debts", localDebt.id);
-            
-            if (firestoreDebt) {
-                batch.update(docRef, { amount: localDebt.amount });
-            } else {
-                batch.set(docRef, { id: localDebt.id, debtor_name: localDebt.debtor_name, amount: localDebt.amount });
-            }
-        });
-
-        // Merge Names
-        const firestoreNamesRef = collection(db, "users", userId, "names");
-        const firestoreNamesSnapshot = await getDocs(firestoreNamesRef);
-        const firestoreNames = firestoreNamesSnapshot.docs.map(d => d.id);
-        
-        localNames.forEach(localName => {
-            if (localName.id && !firestoreNames.includes(localName.id)) {
-                const docRef = doc(db, "users", userId, "names", localName.id);
-                batch.set(docRef, { id: localName.id, name: localName.name });
-            }
-        });
-
-        await batch.commit();
-
-        localStorage.removeItem('debt-manager-records');
-        localStorage.removeItem('debt-manager-local-names');
-
-        toast({ title: "اكتملت المزامنة", description: "تم حفظ بياناتك المحلية في السحابة." });
-        await fetchDataFromFirestore(userId);
-
-    } catch (error) {
-        console.error("Error merging data:", error);
-        toast({ title: "خطأ في المزامنة", description: "لم نتمكن من دمج بياناتك. سيتم تحميل البيانات السحابية.", variant: "destructive" });
-        await fetchDataFromFirestore(userId);
-    } finally {
-        setIsSyncing(false);
-    }
-};
-
-
-  // Auth state change listener
+  // Initial data fetch
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        setAuthDialogOpen(false);
-        await mergeLocalAndFirestoreData(currentUser.uid);
-      } else {
-        setDebtRecords([]);
-        setLocalNames([]);
-        fetchDataFromLocalStorage();
-      }
-    });
-    return () => unsubscribe();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchDataFromLocalStorage, fetchDataFromFirestore]);
+    fetchDataFromLocalStorage();
+  }, [fetchDataFromLocalStorage]);
+
 
   // Filter debt records
   useEffect(() => {
@@ -221,45 +115,23 @@ export const DebtManager = () => {
       name: nameToAdd,
     };
   
-    try {
-      if (user) { // Firestore
-        const docRef = doc(db, "users", user.uid, "names", newNameEntry.id);
-        await setDoc(docRef, newNameEntry);
-        // Re-fetch data from Firestore to ensure UI is in sync
-        await fetchDataFromFirestore(user.uid);
-      } else { // LocalStorage
-        const updatedNames = [...localNames, newNameEntry];
-        localStorage.setItem('debt-manager-local-names', JSON.stringify(updatedNames));
-        // Manually update state for local storage
-        setLocalNames(updatedNames);
-      }
+    const updatedNames = [...localNames, newNameEntry];
+    localStorage.setItem('debt-manager-local-names', JSON.stringify(updatedNames));
+    setLocalNames(updatedNames);
   
-      setNewLocalName("");
-      setLocalSearchTerm(""); 
-      toast({ title: "تم الإضافة", description: `تم إضافة ${nameToAdd} للقائمة` });
-    } catch (error) {
-      console.error("Error adding name:", error);
-      toast({ title: "خطأ", description: "فشلت إضافة الاسم.", variant: "destructive" });
-      setNewLocalName(nameToAdd); // Restore input if save fails
-    }
+    setNewLocalName("");
+    setLocalSearchTerm(""); 
+    toast({ title: "تم الإضافة", description: `تم إضافة ${nameToAdd} للقائمة` });
   };
 
   // Remove local name
   const removeLocalName = async (nameId: string) => {
     const nameToRemove = localNames.find(n => n.id === nameId)?.name || nameId;
-    try {
-        if (user) { // Firestore
-            await deleteDoc(doc(db, "users", user.uid, "names", nameId));
-        } else { // LocalStorage
-            const updatedNames = localNames.filter(n => n.id !== nameId);
-            localStorage.setItem('debt-manager-local-names', JSON.stringify(updatedNames));
-        }
-        setLocalNames(prev => prev.filter(n => n.id !== nameId));
-        toast({ title: "تم الحذف", description: `تم حذف ${nameToRemove} من القائمة` });
-    } catch(error) {
-        console.error("Error removing name:", error);
-        toast({ title: "خطأ", description: "فشلت عملية حذف الاسم.", variant: "destructive" });
-    }
+    
+    const updatedNames = localNames.filter(n => n.id !== nameId);
+    localStorage.setItem('debt-manager-local-names', JSON.stringify(updatedNames));
+    setLocalNames(updatedNames);
+    toast({ title: "تم الحذف", description: `تم حذف ${nameToRemove} من القائمة` });
   };
 
   const recordOrPayDebt = async (isPayment: boolean) => {
@@ -298,20 +170,13 @@ export const DebtManager = () => {
         const recordId = name; // Use name as the ID
         const newRecord: DebtRecord = { id: recordId, debtor_name: name, amount: newAmount };
 
-        if (user) {
-            const docRef = doc(db, "users", user.uid, "debts", recordId);
-            if (newAmount <= 0) {
-                await deleteDoc(docRef);
-            } else {
-                await setDoc(docRef, { debtor_name: name, amount: newAmount }, { merge: true });
-            }
-        } else {
-            let updatedRecords = debtRecords.filter(r => r.id !== recordId);
-            if (newAmount > 0) {
-                updatedRecords.push(newRecord);
-            }
-            localStorage.setItem('debt-manager-records', JSON.stringify(updatedRecords));
+        
+        let updatedRecords = debtRecords.filter(r => r.id !== recordId);
+        if (newAmount > 0) {
+            updatedRecords.push(newRecord);
         }
+        localStorage.setItem('debt-manager-records', JSON.stringify(updatedRecords));
+        
 
         let updatedRecordsState: DebtRecord[];
         if (newAmount <= 0) {
@@ -345,16 +210,11 @@ export const DebtManager = () => {
     }
   };
   
-  const handleLogout = async () => {
-    await auth.signOut();
-    toast({ title: "تم تسجيل الخروج", description: "نأمل رؤيتك قريباً!" });
-  };
-  
   const selectedDebtorRecord = selectedDebtor 
     ? debtRecords.find(s => s.debtor_name === selectedDebtor)
     : null;
     
-  const dataStatusIcon = user ? <Cloud className="h-5 w-5 text-blue-400" title="البيانات مخزنة سحابياً" /> : <Home className="h-5 w-5 text-green-400" title="البيانات مخزنة محلياً" />;
+  const dataStatusIcon = <Home className="h-5 w-5 text-green-400" title="البيانات مخزنة محلياً" />;
 
 
   const handleSuggestPlan = async () => {
@@ -402,27 +262,6 @@ export const DebtManager = () => {
                   {dataStatusIcon}
                   نظام إدارة الديون
                 </CardTitle>
-                <div className="flex items-center gap-2">
-                  {user ? (
-                    <>
-                      <span className="text-sm text-muted-foreground hidden sm:inline">{user.displayName || user.email}</span>
-                      <Button variant="ghost" size="icon" onClick={handleLogout} disabled={isSyncing}>
-                        <LogOut className="h-5 w-5" />
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <Button variant="outline" onClick={() => { setAuthDialogMode('login'); setAuthDialogOpen(true); }}>
-                        <LogIn className="h-5 w-5 ml-2" />
-                        تسجيل الدخول
-                      </Button>
-                      <Button onClick={() => { setAuthDialogMode('signup'); setAuthDialogOpen(true); }}>
-                        <UserPlus className="h-5 w-5 ml-2" />
-                        إنشاء حساب
-                      </Button>
-                    </>
-                  )}
-                </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 {selectedDebtorRecord && (
@@ -440,7 +279,6 @@ export const DebtManager = () => {
                       value={debtorName}
                       onChange={(e) => setDebtorName(e.target.value)}
                       className="text-right"
-                      disabled={isSyncing}
                     />
                     <Input
                       placeholder="المبلغ"
@@ -448,7 +286,6 @@ export const DebtManager = () => {
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
                       className="text-right"
-                      disabled={isSyncing}
                     />
                 </div>
 
@@ -456,14 +293,14 @@ export const DebtManager = () => {
                   <Button
                     onClick={() => recordOrPayDebt(true)}
                     className="bg-success hover:bg-success/90 text-success-foreground font-semibold py-2"
-                    disabled={loading || isSyncing}
+                    disabled={loading}
                   >
                     تسديد الدين
                   </Button>
                   <Button
                     onClick={() => recordOrPayDebt(false)}
                     className="bg-debt-accent hover:bg-debt-accent/90 text-white font-semibold py-2"
-                    disabled={loading || isSyncing}
+                    disabled={loading}
                   >
                     تسجيل دين
                   </Button>
@@ -471,17 +308,17 @@ export const DebtManager = () => {
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Button
-                      onClick={() => user ? fetchDataFromFirestore(user.uid) : fetchDataFromLocalStorage()}
+                      onClick={() => fetchDataFromLocalStorage()}
                       variant="outline"
                       className="w-full py-2 font-semibold"
-                      disabled={loading || isSyncing}
+                      disabled={loading}
                     >
-                      <RefreshCw className={`h-5 w-5 ml-2 ${loading || isSyncing ? 'animate-spin' : ''}`} />
-                      {isSyncing ? 'جاري المزامنة...' : 'تحديث القائمة'}
+                      <RefreshCw className={`h-5 w-5 ml-2 ${loading ? 'animate-spin' : ''}`} />
+                      تحديث القائمة
                     </Button>
                     <Button
                       onClick={handleSuggestPlan}
-                      disabled={!selectedDebtorRecord || loading || isSyncing || isGeneratingPlan}
+                      disabled={!selectedDebtorRecord || loading || isGeneratingPlan}
                       variant="outline"
                       className="w-full py-2 font-semibold border-primary/50 text-primary hover:bg-primary/10"
                     >
@@ -508,7 +345,7 @@ export const DebtManager = () => {
                     className="pr-10 text-right"
                   />
                 </div>
-                {loading && !isSyncing ? (
+                {loading ? (
                     <div className="text-center py-8">
                         <RefreshCw className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
                         <p className="mt-2 text-muted-foreground">جاري التحميل...</p>
@@ -544,7 +381,7 @@ export const DebtManager = () => {
                         ))
                     ) : (
                       <div className="text-center py-8 text-muted-foreground col-span-full">
-                        {searchTerm ? "لا توجد نتائج للبحث" : (user ? "لا توجد ديون سحابية" : "لا توجد ديون محلية")}
+                        {searchTerm ? "لا توجد نتائج للبحث" : "لا توجد ديون مسجلة"}
                       </div>
                     )}
                   </div>
@@ -568,14 +405,12 @@ export const DebtManager = () => {
                     onChange={(e) => setNewLocalName(e.target.value)}
                     className="text-right"
                     onKeyPress={(e) => e.key === 'Enter' && addLocalName()}
-                    disabled={isSyncing}
                   />
                   <Button
                     onClick={addLocalName}
                     variant="outline"
                     size="sm"
                     className="w-full"
-                    disabled={isSyncing}
                   >
                     <Plus className="h-4 w-4 ml-1" />
                     إضافة للقائمة
@@ -634,14 +469,6 @@ export const DebtManager = () => {
           </div>
         </div>
       </div>
-      
-      <AuthDialog
-        open={authDialogOpen}
-        mode={authDialogMode}
-        onOpenChange={setAuthDialogOpen}
-        onModeChange={setAuthDialogMode}
-        onSuccess={() => {}}
-      />
       
       <Dialog open={isPlanDialogOpen} onOpenChange={setIsPlanDialogOpen}>
         <DialogContent dir="rtl">
