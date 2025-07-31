@@ -76,14 +76,12 @@ export const DebtManager = () => {
 
   // --- Auth State & Data Fetching Logic ---
   useEffect(() => {
-    setLoading(true);
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (!currentUser) {
         fetchDataFromLocalStorage();
         setLoading(false);
       }
-      // Firestore listeners are handled in the next useEffect
     });
     return () => unsubscribe();
   }, []);
@@ -109,7 +107,7 @@ export const DebtManager = () => {
         stopLoadingIfReady();
       }, (error) => {
         console.error("Error fetching local names from Firestore:", error);
-        toast({ title: "خطأ", description: "حدث خطأ في تحميل قائمة الأسماء.", variant: "destructive" });
+        toast({ title: "خطأ في الشبكة", description: "فشل تحميل قائمة الأسماء. قد يعمل التطبيق في وضع عدم الاتصال.", variant: "destructive" });
         setLoading(false);
       });
 
@@ -121,7 +119,7 @@ export const DebtManager = () => {
         stopLoadingIfReady();
       }, (error) => {
         console.error("Error fetching debt records from Firestore:", error);
-        toast({ title: "خطأ", description: "حدث خطأ في تحميل سجلات الديون.", variant: "destructive" });
+        toast({ title: "خطأ في الشبكة", description: "فشل تحميل سجلات الديون. قد يعمل التطبيق في وضع عدم الاتصال.", variant: "destructive" });
         setLoading(false);
       });
       
@@ -341,10 +339,12 @@ export const DebtManager = () => {
     if (!user) {
         setLoading(true);
         fetchDataFromLocalStorage();
+        toast({ title: "تم تحديث البيانات المحلية."});
         setLoading(false);
+    } else {
+      // For logged in user, onSnapshot handles refresh. We can just show a toast.
+      toast({ title: "تم التحديث", description: "البيانات السحابية محدثة باستمرار." });
     }
-    // For logged in user, onSnapshot handles refresh. We can just show a toast.
-    toast({ title: "تم التحديث", description: "البيانات محدثة باستمرار." });
   }, [user]);
 
   if (loading) {
