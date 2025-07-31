@@ -3,7 +3,18 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getAuth, onAuthStateChanged, signOut, User } from "firebase/auth";
-import { app } from "@/lib/firebase";
+import { db, app } from "@/lib/firebase";
+import {
+    collection,
+    doc,
+    getDocs,
+    setDoc,
+    deleteDoc,
+    onSnapshot,
+    query,
+    where,
+    writeBatch,
+} from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,13 +34,13 @@ import { ThemeToggle } from "../theme-toggle";
 
 
 interface DebtRecord {
-  id: string;
+  id: string; // Will be debtor_name for simplicity
   debtor_name: string;
   amount: number;
 }
 
 interface LocalName {
-    id: string;
+    id: string; // Can be a timestamp or a generated ID
     name: string;
 }
 
@@ -39,229 +50,272 @@ export const DebtManager = () => {
   const { toast } = useToast();
   const [user, setUser] = useState<User | null>(null);
   const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
+  
   const [debtorName, setDebtorName] = useState("");
   const [amount, setAmount] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [debtRecords, setDebtRecords] = useState<DebtRecord[]>([]);
   const [filteredRecords, setFilteredRecords] = useState<DebtRecord[]>([]);
   const [selectedDebtor, setSelectedDebtor] = useState<string | null>(null);
+  
   const [loading, setLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
   
   const [plan, setPlan] = useState<SuggestPaymentPlanOutput | null>(null);
   const [isPlanDialogOpen, setIsPlanDialogOpen] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
 
-  const formatNumber = (num: number): string => {
-    const formatted = num % 1 === 0 ? num.toString() : num.toFixed(2);
-    return formatted.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  };
-  
   const [localNames, setLocalNames] = useState<LocalName[]>([]);
   const [newLocalName, setNewLocalName] = useState("");
   const [localSearchTerm, setLocalSearchTerm] = useState("");
   const [filteredLocalNames, setFilteredLocalNames] = useState<LocalName[]>([]);
 
+  // --- Utility Functions ---
+  const formatNumber = (num: number): string => {
+    const formatted = num % 1 === 0 ? num.toString() : num.toFixed(2);
+    return formatted.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  };
 
-  // --- Auth State ---
+  // --- Auth State & Data Fetching Logic ---
   useEffect(() => {
+    setLoading(true);
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setLoading(true);
       setUser(currentUser);
       if (!currentUser) {
-        // If logged out, clear all data
-        setDebtRecords([]);
-        setLocalNames([]);
+        // Logged out, load from localStorage
+        fetchDataFromLocalStorage();
+        setLoading(false);
       }
-      setLoading(false);
+      // If logged in, data will be fetched by the real-time listeners below
     });
     return () => unsubscribe();
   }, []);
+  
+  // --- Firestore Real-time Listeners ---
+  useEffect(() => {
+    if (user) {
+      setLoading(true);
+      
+      const namesQuery = query(collection(db, "users", user.uid, "localNames"));
+      const unsubscribeNames = onSnapshot(namesQuery, (querySnapshot) => {
+        const namesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LocalName));
+        setLocalNames(namesData);
+        if(loading) setLoading(false);
+      }, (error) => {
+        console.error("Error fetching local names from Firestore:", error);
+        toast({ title: "خطأ", description: "حدث خطأ في تحميل قائمة الأسماء.", variant: "destructive" });
+        setLoading(false);
+      });
+
+      const debtsQuery = query(collection(db, "users", user.uid, "debtRecords"));
+      const unsubscribeDebts = onSnapshot(debtsQuery, (querySnapshot) => {
+        const debtData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DebtRecord));
+        setDebtRecords(debtData.sort((a, b) => b.amount - a.amount));
+        if(loading) setLoading(false);
+      }, (error) => {
+        console.error("Error fetching debt records from Firestore:", error);
+        toast({ title: "خطأ", description: "حدث خطأ في تحميل سجلات الديون.", variant: "destructive" });
+        setLoading(false);
+      });
+      
+      return () => {
+        unsubscribeNames();
+        unsubscribeDebts();
+      };
+    }
+  }, [user, toast]);
+  
+
+  const fetchDataFromLocalStorage = () => {
+    try {
+        const savedDebts = localStorage.getItem('debt-manager-records');
+        const savedNames = localStorage.getItem('debt-manager-local-names');
+        
+        const debtData: DebtRecord[] = savedDebts ? JSON.parse(savedDebts) : [];
+        const namesData: LocalName[] = savedNames ? JSON.parse(savedNames) : [];
+        
+        setDebtRecords(debtData.sort((a, b) => b.amount - a.amount));
+        setLocalNames(namesData);
+    } catch (error) {
+        console.error('Error fetching data from localStorage:', error);
+        toast({ title: "خطأ", description: "حدث خطأ في تحميل البيانات من المتصفح", variant: "destructive" });
+    }
+  };
+
+  const syncLocalDataToFirestore = async (userId: string) => {
+    setIsSyncing(true);
+    toast({ title: "جاري المزامنة", description: "يتم نقل بياناتك المحلية إلى حسابك السحابي..." });
+  
+    try {
+      const batch = writeBatch(db);
+  
+      // Sync local names
+      const localNamesToSync = localStorage.getItem('debt-manager-local-names');
+      if (localNamesToSync) {
+        const names: LocalName[] = JSON.parse(localNamesToSync);
+        names.forEach(name => {
+          const docRef = doc(db, "users", userId, "localNames", name.id);
+          batch.set(docRef, { name: name.name });
+        });
+      }
+  
+      // Sync debt records
+      const localDebtsToSync = localStorage.getItem('debt-manager-records');
+      if (localDebtsToSync) {
+        const debts: DebtRecord[] = JSON.parse(localDebtsToSync);
+        debts.forEach(debt => {
+          const docRef = doc(db, "users", userId, "debtRecords", debt.id);
+          batch.set(docRef, { debtor_name: debt.debtor_name, amount: debt.amount });
+        });
+      }
+  
+      await batch.commit();
+  
+      // Clear local storage after successful sync
+      localStorage.removeItem('debt-manager-local-names');
+      localStorage.removeItem('debt-manager-records');
+      
+      toast({ title: "اكتملت المزامنة", description: "تم حفظ بياناتك المحلية في حسابك." });
+  
+    } catch (error) {
+      console.error("Error syncing data to Firestore:", error);
+      toast({ title: "فشل المزامنة", description: "لم نتمكن من مزامنة بياناتك المحلية.", variant: "destructive" });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+  
+  const handleAuthSuccess = async (newUser: User) => {
+    const localDebts = localStorage.getItem('debt-manager-records');
+    const localNames = localStorage.getItem('debt-manager-local-names');
+    if ((localDebts && JSON.parse(localDebts).length > 0) || (localNames && JSON.parse(localNames).length > 0)) {
+        await syncLocalDataToFirestore(newUser.uid);
+    }
+  };
 
   const handleLogout = async () => {
+    setSelectedDebtor(null);
+    setDebtorName("");
+    setAmount("");
     await signOut(auth);
     toast({ title: "تم تسجيل الخروج بنجاح" });
   };
-
-
-  // --- Data Fetching Logic ---
-  const fetchData = useCallback(() => {
-    setLoading(true);
-    // TODO: Implement Firestore fetching when user is logged in
-    // For now, we will use localStorage for both cases until the hook is ready.
-    try {
-      const savedDebts = localStorage.getItem('debt-manager-records');
-      const savedNames = localStorage.getItem('debt-manager-local-names');
-      
-      const debtData: DebtRecord[] = savedDebts ? JSON.parse(savedDebts) : [];
-      const namesData: LocalName[] = savedNames ? JSON.parse(savedNames) : [];
-      
-      setDebtRecords(debtData.sort((a, b) => b.amount - a.amount));
-      setLocalNames(namesData);
-
-    } catch (error) {
-      console.error('Error fetching data from localStorage:', error);
-      toast({ title: "خطأ", description: "حدث خطأ في تحميل البيانات من المتصفح", variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
-
-  // Initial data fetch
-  useEffect(() => {
-    // We will switch to firestore fetching later
-    // For now, local storage is used for simplicity
-    fetchData();
-  }, [fetchData, user]);
-
-
-  // Filter debt records
+  
+  // --- Filtering ---
   useEffect(() => {
     setFilteredRecords(
-      searchTerm.trim() === ""
-        ? debtRecords
-        : debtRecords.filter(r => r.debtor_name.toLowerCase().includes(searchTerm.toLowerCase()))
+      searchTerm.trim() === "" ? debtRecords : debtRecords.filter(r => r.debtor_name.toLowerCase().includes(searchTerm.toLowerCase()))
     );
   }, [searchTerm, debtRecords]);
 
-  // Filter local names
   useEffect(() => {
     setFilteredLocalNames(
-      localSearchTerm.trim() === ""
-        ? localNames
-        : localNames.filter(n => n.name.toLowerCase().includes(localSearchTerm.toLowerCase()))
+      localSearchTerm.trim() === "" ? localNames : localNames.filter(n => n.name.toLowerCase().includes(localSearchTerm.toLowerCase()))
     );
   }, [localSearchTerm, localNames]);
+  
 
-  // Add new local name
+  // --- Core Actions ---
   const addLocalName = async () => {
     const nameToAdd = newLocalName.trim();
-    if (!nameToAdd) {
-      toast({ title: "خطأ", description: "يرجى إدخال اسم صحيح", variant: "destructive" });
-      return;
-    }
-    if (localNames.some(n => n.name === nameToAdd)) {
-      toast({ title: "خطأ", description: "هذا الاسم موجود بالفعل", variant: "destructive" });
-      return;
-    }
+    if (!nameToAdd) return toast({ title: "خطأ", description: "يرجى إدخال اسم صحيح", variant: "destructive" });
+    if (localNames.some(n => n.name === nameToAdd)) return toast({ title: "خطأ", description: "هذا الاسم موجود بالفعل", variant: "destructive" });
   
-    const newNameEntry: LocalName = {
-      id: `${Date.now()}-${nameToAdd.replace(/\s+/g, '-')}`,
-      name: nameToAdd,
-    };
+    const newNameEntry: LocalName = { id: `${Date.now()}`, name: nameToAdd };
     
-    // TODO: Add to Firestore if user is logged in
-    const updatedNames = [...localNames, newNameEntry];
-    localStorage.setItem('debt-manager-local-names', JSON.stringify(updatedNames));
-    setLocalNames(updatedNames);
+    if (user) {
+        try {
+            await setDoc(doc(db, "users", user.uid, "localNames", newNameEntry.id), { name: nameToAdd });
+            toast({ title: "تم الإضافة", description: `تم إضافة ${nameToAdd} إلى القائمة السحابية.` });
+        } catch (e) {
+            console.error("Error adding document: ", e);
+            return toast({ title: "خطأ", description: "فشل إضافة الاسم.", variant: "destructive" });
+        }
+    } else {
+        const updatedNames = [...localNames, newNameEntry];
+        localStorage.setItem('debt-manager-local-names', JSON.stringify(updatedNames));
+        setLocalNames(updatedNames);
+        toast({ title: "تم الإضافة", description: `تم إضافة ${nameToAdd} للقائمة المحلية.` });
+    }
   
     setNewLocalName("");
-    setLocalSearchTerm(""); 
-    toast({ title: "تم الإضافة", description: `تم إضافة ${nameToAdd} للقائمة` });
+    setLocalSearchTerm("");
   };
 
-  // Remove local name
   const removeLocalName = async (nameId: string) => {
-    const nameToRemove = localNames.find(n => n.id === nameId)?.name || nameId;
-    // TODO: Remove from Firestore if user is logged in
-    const updatedNames = localNames.filter(n => n.id !== nameId);
-    localStorage.setItem('debt-manager-local-names', JSON.stringify(updatedNames));
-    setLocalNames(updatedNames);
-    toast({ title: "تم الحذف", description: `تم حذف ${nameToRemove} من القائمة` });
+    const nameToRemove = localNames.find(n => n.id === nameId)?.name || "الاسم المحدد";
+    if (user) {
+        try {
+            await deleteDoc(doc(db, "users", user.uid, "localNames", nameId));
+            toast({ title: "تم الحذف", description: `تم حذف ${nameToRemove} من القائمة السحابية.` });
+        } catch(e) {
+            console.error("Error deleting document: ", e);
+            return toast({ title: "خطأ", description: "فشل حذف الاسم.", variant: "destructive" });
+        }
+    } else {
+        const updatedNames = localNames.filter(n => n.id !== nameId);
+        localStorage.setItem('debt-manager-local-names', JSON.stringify(updatedNames));
+        setLocalNames(updatedNames);
+        toast({ title: "تم الحذف", description: `تم حذف ${nameToRemove} من القائمة المحلية.` });
+    }
   };
 
   const recordOrPayDebt = async (isPayment: boolean) => {
     const name = debtorName.trim();
-    if (!name || !amount.trim()) {
-      toast({ title: "خطأ", description: "يرجى إدخال اسم المدين والمبلغ", variant: "destructive" });
-      return;
-    }
     const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum <= 0) {
-      toast({ title: "خطأ", description: "يرجى إدخال مبلغ صحيح", variant: "destructive" });
-      return;
+    if (!name || !amount.trim() || isNaN(amountNum) || amountNum <= 0) {
+      return toast({ title: "خطأ", description: "يرجى إدخال اسم ومبلغ صحيحين.", variant: "destructive" });
     }
-
+    
     setLoading(true);
-
+    
     try {
         const existingRecord = debtRecords.find(r => r.debtor_name === name);
-
-        if (isPayment && !existingRecord) {
-            toast({ title: "خطأ", description: "لا يوجد دين مسجل لهذا الاسم", variant: "destructive" });
-            setLoading(false);
-            return;
-        }
-
-        const newAmount = existingRecord 
-            ? (isPayment ? existingRecord.amount - amountNum : existingRecord.amount + amountNum)
-            : amountNum;
-
-        if (newAmount < 0) {
-            toast({ title: "خطأ", description: "مبلغ السداد أكبر من الدين.", variant: "destructive" });
-            setLoading(false);
-            return;
-        }
+        if (isPayment && !existingRecord) throw new Error("لا يوجد دين مسجل لهذا الاسم");
         
-        const recordId = name; 
+        const newAmount = existingRecord ? (isPayment ? existingRecord.amount - amountNum : existingRecord.amount + amountNum) : amountNum;
+        if (newAmount < 0) throw new Error("مبلغ السداد أكبر من الدين.");
+
+        const recordId = name; // Use name as ID for simplicity
         const newRecord: DebtRecord = { id: recordId, debtor_name: name, amount: newAmount };
 
-        // TODO: Update Firestore if user is logged in
-        let updatedRecords = debtRecords.filter(r => r.id !== recordId);
-        if (newAmount > 0) {
-            updatedRecords.push(newRecord);
-        }
-        localStorage.setItem('debt-manager-records', JSON.stringify(updatedRecords));
-        
-
-        let updatedRecordsState: DebtRecord[];
-        if (newAmount <= 0) {
-            updatedRecordsState = debtRecords.filter(r => r.id !== recordId);
-            if (isPayment) toast({ title: "تم التسديد الكامل", description: `تم تسديد دين ${name} بالكامل` });
-        } else {
-            const existing = debtRecords.some(r => r.id === recordId);
-            if (existing) {
-                updatedRecordsState = debtRecords.map(r => r.id === recordId ? newRecord : r);
+        if (user) {
+            const docRef = doc(db, "users", user.uid, "debtRecords", recordId);
+            if (newAmount > 0) {
+                await setDoc(docRef, { debtor_name: name, amount: newAmount });
             } else {
-                updatedRecordsState = [...debtRecords, newRecord];
+                await deleteDoc(docRef);
             }
-             
-            if (isPayment) {
-                 const message = `تم سداد ${formatNumber(amountNum)}. الدين المتبقي: ${formatNumber(newAmount)}`;
-                 toast({ title: "تم السداد", description: message });
-             } else {
-                 const message = existingRecord ? `تم تحديث دين ${name}. المبلغ الجديد: ${formatNumber(newAmount)}` : `تم تسجيل دين لـ ${name} بمبلغ ${formatNumber(amountNum)} دينار`;
-                 toast({ title: "تم تحديث الدين", description: message });
-             }
+        } else {
+            let updatedRecords = debtRecords.filter(r => r.id !== recordId);
+            if (newAmount > 0) updatedRecords.push(newRecord);
+            localStorage.setItem('debt-manager-records', JSON.stringify(updatedRecords));
+            setDebtRecords(updatedRecords.sort((a, b) => b.amount - a.amount));
         }
-        setDebtRecords(updatedRecordsState.sort((a, b) => b.amount - a.amount));
+
+        const actionText = isPayment ? "سداد" : "تسجيل";
+        const message = newAmount <= 0 
+            ? `تم تسديد دين ${name} بالكامل.`
+            : (isPayment ? `تم سداد ${formatNumber(amountNum)}. المتبقي: ${formatNumber(newAmount)}` : `تم تحديث دين ${name}. المبلغ الجديد: ${formatNumber(newAmount)}`);
+        toast({ title: `تمت عملية ال${actionText}`, description: message });
 
         setDebtorName("");
         setAmount("");
-    } catch(error) {
+
+    } catch(error: any) {
         console.error("Error updating debt:", error);
-        toast({ title: "خطأ", description: "فشلت عملية تحديث الدين.", variant: "destructive" });
+        toast({ title: "خطأ", description: error.message || "فشلت عملية تحديث الدين.", variant: "destructive" });
     } finally {
         setLoading(false);
     }
   };
   
-  const selectedDebtorRecord = selectedDebtor 
-    ? debtRecords.find(s => s.debtor_name === selectedDebtor)
-    : null;
+  const selectedDebtorRecord = selectedDebtor ? debtRecords.find(s => s.debtor_name === selectedDebtor) : null;
 
   const handleSuggestPlan = async () => {
-    if (!selectedDebtorRecord) {
-      toast({
-        title: "خطأ",
-        description: "يرجى تحديد مدين أولاً لاقتراح خطة سداد.",
-        variant: "destructive",
-      });
-      return;
-    }
-    
+    if (!selectedDebtorRecord) return;
     setIsGeneratingPlan(true);
     setIsPlanDialogOpen(true);
-    
     try {
       const result = await suggestPaymentPlan({
         debtorName: selectedDebtorRecord.debtor_name,
@@ -270,21 +324,36 @@ export const DebtManager = () => {
       setPlan(result);
     } catch (error) {
       console.error("Error suggesting payment plan:", error);
-      toast({
-        title: "خطأ في الذكاء الاصطناعي",
-        description: "لم نتمكن من إنشاء خطة سداد في الوقت الحالي.",
-        variant: "destructive",
-      });
-      setIsPlanDialogOpen(false); // Close dialog on error
+      toast({ title: "خطأ في الذكاء الاصطناعي", description: "لم نتمكن من إنشاء خطة.", variant: "destructive" });
+      setIsPlanDialogOpen(false);
     } finally {
       setIsGeneratingPlan(false);
     }
   };
 
+  const refreshData = useCallback(() => {
+    if (user) {
+        // With real-time listeners, a manual refresh isn't strictly necessary, 
+        // but we can re-trigger loading state to give user feedback.
+        setLoading(true);
+        // Data will refresh automatically from listeners.
+        // We can add a small delay to simulate fetching.
+        setTimeout(() => setLoading(false), 500);
+    } else {
+        setLoading(true);
+        fetchDataFromLocalStorage();
+        setLoading(false);
+    }
+    toast({ title: "تم التحديث", description: "تم تحديث البيانات بنجاح." });
+  }, [user]);
 
   return (
     <div dir="rtl" className="p-4">
-      <AuthDialog open={isAuthDialogOpen} onOpenChange={setIsAuthDialogOpen} onAuthSuccess={fetchData} />
+      <AuthDialog 
+        open={isAuthDialogOpen} 
+        onOpenChange={setIsAuthDialogOpen} 
+        onAuthSuccess={handleAuthSuccess} 
+      />
       <div className="absolute top-4 left-4 z-50">
         <ThemeToggle />
       </div>
@@ -331,14 +400,12 @@ export const DebtManager = () => {
                       placeholder="الاسم"
                       value={debtorName}
                       onChange={(e) => setDebtorName(e.target.value)}
-                      className="text-right"
                     />
                     <Input
                       placeholder="المبلغ"
                       type="number"
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
-                      className="text-right"
                     />
                 </div>
 
@@ -346,14 +413,14 @@ export const DebtManager = () => {
                   <Button
                     onClick={() => recordOrPayDebt(true)}
                     className="bg-success hover:bg-success/90 text-success-foreground font-semibold py-2"
-                    disabled={loading}
+                    disabled={loading || isSyncing}
                   >
                     تسديد الدين
                   </Button>
                   <Button
                     onClick={() => recordOrPayDebt(false)}
                     className="bg-debt-accent hover:bg-debt-accent/90 text-white font-semibold py-2"
-                    disabled={loading}
+                    disabled={loading || isSyncing}
                   >
                     تسجيل دين
                   </Button>
@@ -361,17 +428,17 @@ export const DebtManager = () => {
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Button
-                      onClick={() => fetchData()}
+                      onClick={refreshData}
                       variant="outline"
                       className="w-full py-2 font-semibold"
-                      disabled={loading}
+                      disabled={loading || isSyncing}
                     >
-                      <RefreshCw className={`h-5 w-5 ml-2 ${loading ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`h-5 w-5 ml-2 ${(loading || isSyncing) ? 'animate-spin' : ''}`} />
                       تحديث القائمة
                     </Button>
                     <Button
                       onClick={handleSuggestPlan}
-                      disabled={!selectedDebtorRecord || loading || isGeneratingPlan}
+                      disabled={!selectedDebtorRecord || loading || isGeneratingPlan || isSyncing}
                       variant="outline"
                       className="w-full py-2 font-semibold border-primary/50 text-primary hover:bg-primary/10"
                     >
@@ -395,13 +462,13 @@ export const DebtManager = () => {
                     placeholder="ابحث..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pr-10 text-right"
+                    className="pr-10"
                   />
                 </div>
-                {loading ? (
+                {(loading || isSyncing) ? (
                     <div className="text-center py-8">
                         <RefreshCw className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
-                        <p className="mt-2 text-muted-foreground">جاري التحميل...</p>
+                        <p className="mt-2 text-muted-foreground">{isSyncing ? 'جاري المزامنة...' : 'جاري التحميل...'}</p>
                     </div>
                 ) : (
                   <div className="max-h-40 overflow-y-auto p-2 border rounded-lg bg-background/50 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -456,7 +523,6 @@ export const DebtManager = () => {
                     placeholder="أدخل اسم جديد..."
                     value={newLocalName}
                     onChange={(e) => setNewLocalName(e.target.value)}
-                    className="text-right"
                     onKeyPress={(e) => e.key === 'Enter' && addLocalName()}
                   />
                   <Button
@@ -464,6 +530,7 @@ export const DebtManager = () => {
                     variant="outline"
                     size="sm"
                     className="w-full"
+                    disabled={loading || isSyncing}
                   >
                     <Plus className="h-4 w-4 ml-1" />
                     إضافة للقائمة
@@ -476,7 +543,7 @@ export const DebtManager = () => {
                     placeholder="بحث في الأسماء..."
                     value={localSearchTerm}
                     onChange={(e) => setLocalSearchTerm(e.target.value)}
-                    className="text-right pr-10"
+                    className="pr-10"
                   />
                 </div>
 
@@ -504,6 +571,7 @@ export const DebtManager = () => {
                                 removeLocalName(localName.id);
                               }}
                               className="h-6 w-6 p-0 hover:bg-destructive hover:text-destructive-foreground"
+                              disabled={loading || isSyncing}
                             >
                               <X className="h-4 w-4" />
                             </Button>
