@@ -72,9 +72,18 @@ export const AuthDialog = ({
       onSuccess();
     } catch (error: any) {
       console.error(error);
+      let description = "حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.";
+      // Handle specific auth errors for better user feedback
+      if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found') {
+        description = "البريد الإلكتروني أو كلمة المرور غير صحيحة. يرجى التحقق منها والمحاولة مرة أخرى.";
+      } else if (error.code === 'auth/email-already-in-use') {
+        description = "هذا البريد الإلكتروني مسجل بالفعل. يرجى تسجيل الدخول بدلاً من ذلك.";
+      } else if (error.code === 'auth/weak-password') {
+        description = "كلمة المرور ضعيفة جدًا. يجب أن تتكون من 6 أحرف على الأقل.";
+      }
       toast({
         title: "حدث خطأ",
-        description: error.message,
+        description: description,
         variant: "destructive",
       });
     } finally {
