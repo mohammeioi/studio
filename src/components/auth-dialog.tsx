@@ -7,6 +7,7 @@ import {
   signInWithEmailAndPassword,
   getAuth,
   updateProfile,
+  User,
 } from "firebase/auth";
 import { app } from "@/lib/firebase"; // Ensure firebase is initialized
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 interface AuthDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAuthSuccess: () => void;
+  onAuthSuccess: (user: User, isNewUser: boolean) => void;
 }
 
 const auth = getAuth(app);
@@ -57,14 +58,15 @@ export const AuthDialog = ({ open, onOpenChange, onAuthSuccess }: AuthDialogProp
           title: "تم إنشاء الحساب",
           description: "تم تسجيل دخولك بنجاح.",
         });
+        onAuthSuccess(userCredential.user, true); // It's a new user
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
         toast({
           title: "تم تسجيل الدخول",
           description: "أهلاً بعودتك!",
         });
+        onAuthSuccess(userCredential.user, false); // It's an existing user
       }
-      onAuthSuccess();
       onOpenChange(false);
     } catch (error: any) {
       console.error("Firebase Auth Error:", error);

@@ -7,13 +7,11 @@ import { db, app } from "@/lib/firebase";
 import {
     collection,
     doc,
-    getDocs,
+    onSnapshot,
     setDoc,
     deleteDoc,
-    onSnapshot,
-    query,
-    where,
     writeBatch,
+    query
 } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,7 +56,7 @@ export const DebtManager = () => {
   const [filteredRecords, setFilteredRecords] = useState<DebtRecord[]>([]);
   const [selectedDebtor, setSelectedDebtor] = useState<string | null>(null);
   
-  const [loading, setLoading] = useState(true); // Start with loading true
+  const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   
   const [plan, setPlan] = useState<SuggestPaymentPlanOutput | null>(null);
@@ -78,13 +76,14 @@ export const DebtManager = () => {
 
   // --- Auth State & Data Fetching Logic ---
   useEffect(() => {
+    setLoading(true);
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (!currentUser) {
         fetchDataFromLocalStorage();
-        setLoading(false); // Stop loading when user is confirmed logged out
+        setLoading(false);
       }
-      // If logged in, the Firestore useEffect will handle the loading state.
+      // Firestore listeners are handled in the next useEffect
     });
     return () => unsubscribe();
   }, []);
@@ -157,7 +156,6 @@ export const DebtManager = () => {
     try {
       const batch = writeBatch(db);
   
-      // Sync local names
       const localNamesToSync = localStorage.getItem('debt-manager-local-names');
       if (localNamesToSync) {
         const names: LocalName[] = JSON.parse(localNamesToSync);
@@ -167,7 +165,6 @@ export const DebtManager = () => {
         });
       }
   
-      // Sync debt records
       const localDebtsToSync = localStorage.getItem('debt-manager-records');
       if (localDebtsToSync) {
         const debts: DebtRecord[] = JSON.parse(localDebtsToSync);
@@ -179,7 +176,6 @@ export const DebtManager = () => {
   
       await batch.commit();
   
-      // Clear local storage after successful sync
       localStorage.removeItem('debt-manager-local-names');
       localStorage.removeItem('debt-manager-records');
       
@@ -193,13 +189,16 @@ export const DebtManager = () => {
     }
   };
   
-  const handleAuthSuccess = async (newUser: User) => {
+  const handleAuthSuccess = async (newUser: User, isNewUser: boolean) => {
     setUser(newUser);
-    const localDebts = localStorage.getItem('debt-manager-records');
-    const localNames = localStorage.getItem('debt-manager-local-names');
-    if ((localDebts && JSON.parse(localDebts).length > 0) || (localNames && JSON.parse(localNames).length > 0)) {
-        await syncLocalDataToFirestore(newUser.uid);
+    if (isNewUser) {
+        const localDebts = localStorage.getItem('debt-manager-records');
+        const localNames = localStorage.getItem('debt-manager-local-names');
+        if ((localDebts && JSON.parse(localDebts).length > 0) || (localNames && JSON.parse(localNames).length > 0)) {
+            await syncLocalDataToFirestore(newUser.uid);
+        }
     }
+    // If it's an existing user, the useEffect listener for `user` will fetch their cloud data automatically.
   };
 
   const handleLogout = async () => {
@@ -207,8 +206,8 @@ export const DebtManager = () => {
     setDebtorName("");
     setAmount("");
     await signOut(auth);
-    setDebtRecords([]); // Clear data on logout
-    setLocalNames([]); // Clear data on logout
+    setDebtRecords([]);
+    setLocalNames([]);
     toast({ title: "تم تسجيل الخروج بنجاح" });
   };
   
@@ -277,9 +276,7 @@ export const DebtManager = () => {
     if (!name || !amount.trim() || isNaN(amountNum) || amountNum <= 0) {
       return toast({ title: "خطأ", description: "يرجى إدخال اسم ومبلغ صحيحين.", variant: "destructive" });
     }
-    
-    // setLoading(true); // Don't use global loading for this quick operation
-    
+        
     try {
         const existingRecord = debtRecords.find(r => r.debtor_name === name);
         if (isPayment && !existingRecord) throw new Error("لا يوجد دين مسجل لهذا الاسم");
@@ -316,8 +313,6 @@ export const DebtManager = () => {
     } catch(error: any) {
         console.error("Error updating debt:", error);
         toast({ title: "خطأ", description: error.message || "فشلت عملية تحديث الدين.", variant: "destructive" });
-    } finally {
-        // setLoading(false);
     }
   };
   
@@ -343,16 +338,13 @@ export const DebtManager = () => {
   };
 
   const refreshData = useCallback(() => {
-    if (user) {
-        setLoading(true);
-        // Data will refresh automatically from listeners.
-        // We can add a small delay to simulate fetching, which is now handled by the improved logic.
-    } else {
+    if (!user) {
         setLoading(true);
         fetchDataFromLocalStorage();
         setLoading(false);
     }
-    toast({ title: "تم التحديث", description: "تم تحديث البيانات بنجاح." });
+    // For logged in user, onSnapshot handles refresh. We can just show a toast.
+    toast({ title: "تم التحديث", description: "البيانات محدثة باستمرار." });
   }, [user]);
 
   if (loading) {
