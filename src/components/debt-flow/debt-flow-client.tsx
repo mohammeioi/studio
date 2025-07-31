@@ -285,19 +285,8 @@ export const DebtManager = () => {
   return (
     <div dir="rtl" className="p-4">
       <AuthDialog open={isAuthDialogOpen} onOpenChange={setIsAuthDialogOpen} onAuthSuccess={fetchData} />
-      <div className="absolute top-4 left-4 z-50 flex gap-2">
+      <div className="absolute top-4 left-4 z-50">
         <ThemeToggle />
-        {user ? (
-            <Button variant="outline" size="icon" onClick={handleLogout} className="bg-card/80 backdrop-blur-sm shadow-lg border-white/20 dark:border-white/10">
-                <LogOut />
-                <span className="sr-only">تسجيل الخروج</span>
-            </Button>
-        ) : (
-            <Button variant="outline" size="icon" onClick={() => setIsAuthDialogOpen(true)} className="bg-card/80 backdrop-blur-sm shadow-lg border-white/20 dark:border-white/10">
-                <LogIn />
-                <span className="sr-only">تسجيل الدخول</span>
-            </Button>
-        )}
       </div>
 
       <div className="max-w-6xl mx-auto w-full">
@@ -311,12 +300,19 @@ export const DebtManager = () => {
                 </CardTitle>
                 <div className="text-sm text-muted-foreground flex items-center gap-2">
                   {user ? (
-                      <>
+                      <div className="flex items-center gap-3">
                           <UserIcon className="h-5 w-5 text-green-400" />
                           <span>{user.displayName || user.email}</span>
-                      </>
+                          <Button variant="ghost" size="icon" onClick={handleLogout} className="h-8 w-8 rounded-full">
+                              <LogOut className="h-5 w-5"/>
+                              <span className="sr-only">تسجيل الخروج</span>
+                          </Button>
+                      </div>
                   ) : (
-                      <span>وضع عدم الاتصال</span>
+                      <Button onClick={() => setIsAuthDialogOpen(true)}>
+                          <LogIn className="ml-2 h-5 w-5"/>
+                          تسجيل الدخول / حساب جديد
+                      </Button>
                   )}
                 </div>
               </CardHeader>
