@@ -93,7 +93,7 @@ export const DebtManager = () => {
         const canvas = await html2canvas(invoiceElement, {
             scale: 2, // Increase resolution
             useCORS: true,
-            backgroundColor: null, 
+            backgroundColor: null,
         });
 
         const imgData = canvas.toDataURL('image/png');
@@ -665,20 +665,24 @@ export const DebtManager = () => {
                   <h3 className="text-lg font-semibold text-primary">فاتورة</h3>
                   <span className="text-sm text-muted-foreground">{invoice.invoiceNumber}</span>
                 </div>
+                
                 <div className="flex justify-between items-start text-sm">
-                  <div className="space-y-2">
+                   {/* Right Column */}
+                   <div className="space-y-2 text-right">
                       <h4 className="font-semibold">إلى:</h4>
                       <p className="text-muted-foreground">{selectedDebtorRecord.debtor_name}</p>
                       <h4 className="font-semibold pt-2">تاريخ الإصدار:</h4>
                       <p className="text-muted-foreground">{invoice.issueDate}</p>
-                  </div>
-                  <div className="space-y-2 text-left">
-                      <h4 className="font-semibold">من:</h4>
-                      <p className="text-muted-foreground">{user?.displayName}</p>
-                      <h4 className="font-semibold pt-2">تاريخ الاستحقاق:</h4>
-                      <p className="text-muted-foreground">{invoice.dueDate}</p>
-                  </div>
+                   </div>
+                   {/* Left Column */}
+                   <div className="space-y-2 text-left">
+                       <h4 className="font-semibold">من:</h4>
+                       <p className="text-muted-foreground">{user?.displayName}</p>
+                       <h4 className="font-semibold pt-2">تاريخ الاستحقاق:</h4>
+                       <p className="text-muted-foreground">{invoice.dueDate}</p>
+                   </div>
                 </div>
+
                 <div className="border-t pt-4 space-y-2">
                    <div className="flex justify-between items-center">
                       <span>المبلغ الإجمالي</span>
