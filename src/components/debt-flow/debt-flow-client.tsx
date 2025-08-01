@@ -77,15 +77,7 @@ export const DebtManager = () => {
   };
 
   const handlePrint = () => {
-    const printContent = invoicePrintRef.current;
-    if (printContent) {
-      const originalContents = document.body.innerHTML;
-      const printContents = printContent.innerHTML;
-      document.body.innerHTML = printContents;
-      window.print();
-      document.body.innerHTML = originalContents;
-      window.location.reload(); // To restore event listeners
-    }
+    window.print();
   };
 
   // --- Auth State & Data Fetching Logic ---
@@ -333,7 +325,7 @@ export const DebtManager = () => {
   const selectedDebtorRecord = selectedDebtor ? debtRecords.find(s => s.debtor_name === selectedDebtor) : null;
 
   const handleGenerateInvoice = async () => {
-    if (!selectedDebtorRecord || !user) return;
+    if (!selectedDebtorRecord || !user || !lastPayment) return;
     setIsGeneratingInvoice(true);
     setIsInvoiceDialogOpen(true);
     setInvoice(null);
@@ -360,7 +352,7 @@ export const DebtManager = () => {
     } else {
       toast({ title: "تم التحديث", description: "البيانات السحابية محدثة باستمرار." });
     }
-  }, [user]);
+  }, [user, toast]);
 
   if (loading) {
     return (
@@ -372,13 +364,13 @@ export const DebtManager = () => {
   }
 
   return (
-    <div dir="rtl" className="p-4">
+    <div dir="rtl" className="p-4 app-container">
       <AuthDialog 
         open={isAuthDialogOpen} 
         onOpenChange={setIsAuthDialogOpen} 
         onAuthSuccess={handleAuthSuccess} 
       />
-      <div className="absolute top-4 left-4 z-50">
+      <div className="absolute top-4 left-4 z-50 no-print">
         <ThemeToggle />
       </div>
 
@@ -386,7 +378,7 @@ export const DebtManager = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full">
           
           <div className="lg:col-span-2 flex flex-col gap-6">
-            <Card className="bg-card shadow-lg">
+            <Card className="bg-card shadow-lg no-print">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="text-2xl font-bold text-foreground flex items-center gap-2">
                   نظام إدارة الديون
@@ -473,7 +465,7 @@ export const DebtManager = () => {
               </CardContent>
             </Card>
 
-            <Card className="bg-card shadow-lg">
+            <Card className="bg-card shadow-lg no-print">
               <CardHeader>
                 <CardTitle className="text-xl text-center">
                   الديون المسجلة ({filteredRecords.length})
@@ -535,7 +527,7 @@ export const DebtManager = () => {
             </Card>
           </div>
 
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 no-print">
             <Card className="bg-card shadow-lg sticky top-4">
               <CardHeader>
                 <CardTitle className="text-xl text-center">
@@ -617,15 +609,15 @@ export const DebtManager = () => {
       </div>
       
       <Dialog open={isInvoiceDialogOpen} onOpenChange={setIsInvoiceDialogOpen}>
-        <DialogContent dir="rtl" className="sm:max-w-md">
-          <DialogHeader>
+        <DialogContent dir="rtl" className="sm:max-w-md printable-content">
+          <DialogHeader className="no-print">
             <DialogTitle>فاتورة دين</DialogTitle>
             <DialogDescription>
               هذه فاتورة تم إنشاؤها للدين المحدد.
             </DialogDescription>
           </DialogHeader>
           {isGeneratingInvoice ? (
-            <div className="flex items-center justify-center p-8">
+            <div className="flex items-center justify-center p-8 no-print">
               <RefreshCw className="h-8 w-8 animate-spin text-primary" />
               <p className="mr-4">جاري إنشاء الفاتورة...</p>
             </div>
@@ -669,7 +661,7 @@ export const DebtManager = () => {
               </div>
             </div>
           ) : (
-             <div className="text-center p-8">
+             <div className="text-center p-8 no-print">
                 <p>لم نتمكن من إنشاء الفاتورة. يرجى المحاولة مرة أخرى.</p>
              </div>
           )}

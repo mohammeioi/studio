@@ -104,15 +104,34 @@ body {
 }
 
 @media print {
-  body {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+  body * {
+    visibility: hidden;
   }
+
+  .printable, .printable * {
+    visibility: visible;
+  }
+
   .printable {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
     color: black;
     background-color: white;
   }
+
   .no-print {
     display: none;
   }
+
+  .printable-content {
+    visibility: visible;
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+
 }
