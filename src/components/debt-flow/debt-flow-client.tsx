@@ -25,8 +25,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Plus, User as UserIcon, LogOut, LogIn, RefreshCw, X, Lightbulb } from "lucide-react";
-import { suggestPaymentPlan, SuggestPaymentPlanOutput } from "@/ai/flows/suggest-payment-plan";
+import { Search, Plus, User as UserIcon, LogOut, LogIn, RefreshCw, X, FileText } from "lucide-react";
+import { generateInvoice, GenerateInvoiceOutput } from "@/ai/flows/generate-invoice-flow";
 import { AuthDialog } from "@/components/auth-dialog";
 import { ThemeToggle } from "../theme-toggle";
 
@@ -59,9 +59,9 @@ export const DebtManager = () => {
   const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   
-  const [plan, setPlan] = useState<SuggestPaymentPlanOutput | null>(null);
-  const [isPlanDialogOpen, setIsPlanDialogOpen] = useState(false);
-  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [invoice, setInvoice] = useState<GenerateInvoiceOutput | null>(null);
+  const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false);
+  const [isGeneratingInvoice, setIsGeneratingInvoice] = useState(false);
 
   const [localNames, setLocalNames] = useState<LocalName[]>([]);
   const [newLocalName, setNewLocalName] = useState("");
@@ -80,8 +80,10 @@ export const DebtManager = () => {
       setUser(currentUser);
       if (!currentUser) {
         fetchDataFromLocalStorage();
-        setLoading(false);
       }
+      // We set loading to false here to quickly show the UI,
+      // the real loading state for data will be handled inside listeners.
+      setLoading(false); 
     });
     return () => unsubscribe();
   }, []);
@@ -89,22 +91,12 @@ export const DebtManager = () => {
   // --- Firestore Real-time Listeners ---
   useEffect(() => {
     if (user) {
-      setLoading(true);
-      let namesLoaded = false;
-      let debtsLoaded = false;
-
-      const stopLoadingIfReady = () => {
-        if (namesLoaded && debtsLoaded) {
-          setLoading(false);
-        }
-      };
+      setLoading(true); // Show loader when user logs in and we fetch data
       
       const namesQuery = query(collection(db, "users", user.uid, "localNames"));
       const unsubscribeNames = onSnapshot(namesQuery, (querySnapshot) => {
         const namesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LocalName));
         setLocalNames(namesData);
-        namesLoaded = true;
-        stopLoadingIfReady();
       }, (error) => {
         console.error("Error fetching local names from Firestore:", error);
         toast({ title: "خطأ في الشبكة", description: "فشل تحميل قائمة الأسماء. قد يعمل التطبيق في وضع عدم الاتصال.", variant: "destructive" });
@@ -115,8 +107,7 @@ export const DebtManager = () => {
       const unsubscribeDebts = onSnapshot(debtsQuery, (querySnapshot) => {
         const debtData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DebtRecord));
         setDebtRecords(debtData.sort((a, b) => b.amount - a.amount));
-        debtsLoaded = true;
-        stopLoadingIfReady();
+        setLoading(false); // Hide loader once debts (main data) are loaded
       }, (error) => {
         console.error("Error fetching debt records from Firestore:", error);
         toast({ title: "خطأ في الشبكة", description: "فشل تحميل سجلات الديون. قد يعمل التطبيق في وضع عدم الاتصال.", variant: "destructive" });
@@ -127,11 +118,16 @@ export const DebtManager = () => {
         unsubscribeNames();
         unsubscribeDebts();
       };
+    } else {
+        // Clear data when user logs out
+        setDebtRecords([]);
+        setLocalNames([]);
     }
   }, [user, toast]);
   
 
   const fetchDataFromLocalStorage = () => {
+    setLoading(true);
     try {
         const savedDebts = localStorage.getItem('debt-manager-records');
         const savedNames = localStorage.getItem('debt-manager-local-names');
@@ -144,6 +140,8 @@ export const DebtManager = () => {
     } catch (error) {
         console.error('Error fetching data from localStorage:', error);
         toast({ title: "خطأ", description: "حدث خطأ في تحميل البيانات من المتصفح", variant: "destructive" });
+    } finally {
+        setLoading(false);
     }
   };
 
@@ -196,7 +194,7 @@ export const DebtManager = () => {
             await syncLocalDataToFirestore(newUser.uid);
         }
     }
-    // If it's an existing user, the useEffect listener for `user` will fetch their cloud data automatically.
+    // For existing user, the useEffect[user] will handle fetching data from firestore.
   };
 
   const handleLogout = async () => {
@@ -204,8 +202,7 @@ export const DebtManager = () => {
     setDebtorName("");
     setAmount("");
     await signOut(auth);
-    setDebtRecords([]);
-    setLocalNames([]);
+    fetchDataFromLocalStorage(); // load local data after logout
     toast({ title: "تم تسجيل الخروج بنجاح" });
   };
   
@@ -316,31 +313,31 @@ export const DebtManager = () => {
   
   const selectedDebtorRecord = selectedDebtor ? debtRecords.find(s => s.debtor_name === selectedDebtor) : null;
 
-  const handleSuggestPlan = async () => {
-    if (!selectedDebtorRecord) return;
-    setIsGeneratingPlan(true);
-    setIsPlanDialogOpen(true);
+  const handleGenerateInvoice = async () => {
+    if (!selectedDebtorRecord || !user) return;
+    setIsGeneratingInvoice(true);
+    setIsInvoiceDialogOpen(true);
+    setInvoice(null);
     try {
-      const result = await suggestPaymentPlan({
+      const result = await generateInvoice({
         debtorName: selectedDebtorRecord.debtor_name,
         debtAmount: selectedDebtorRecord.amount,
+        creditorName: user.displayName || "صاحب الدين",
       });
-      setPlan(result);
+      setInvoice(result);
     } catch (error) {
-      console.error("Error suggesting payment plan:", error);
-      toast({ title: "خطأ في الذكاء الاصطناعي", description: "لم نتمكن من إنشاء خطة.", variant: "destructive" });
-      setIsPlanDialogOpen(false);
+      console.error("Error generating invoice:", error);
+      toast({ title: "خطأ في الذكاء الاصطناعي", description: "لم نتمكن من إنشاء الفاتورة.", variant: "destructive" });
+      setIsInvoiceDialogOpen(false);
     } finally {
-      setIsGeneratingPlan(false);
+      setIsGeneratingInvoice(false);
     }
   };
 
   const refreshData = useCallback(() => {
     if (!user) {
-        setLoading(true);
         fetchDataFromLocalStorage();
         toast({ title: "تم تحديث البيانات المحلية."});
-        setLoading(false);
     } else {
       // For logged in user, onSnapshot handles refresh. We can just show a toast.
       toast({ title: "تم التحديث", description: "البيانات السحابية محدثة باستمرار." });
@@ -446,13 +443,13 @@ export const DebtManager = () => {
                       تحديث القائمة
                     </Button>
                     <Button
-                      onClick={handleSuggestPlan}
-                      disabled={!selectedDebtorRecord || isGeneratingPlan || isSyncing}
+                      onClick={handleGenerateInvoice}
+                      disabled={!selectedDebtorRecord || isGeneratingInvoice || isSyncing || !user}
                       variant="outline"
                       className="w-full py-2 font-semibold border-primary/50 text-primary hover:bg-primary/10"
                     >
-                      <Lightbulb className="h-5 w-5 ml-2" />
-                      خطة سداد ذكية
+                      <FileText className="h-5 w-5 ml-2" />
+                      إنشاء فاتورة
                     </Button>
                 </div>
               </CardContent>
@@ -600,41 +597,63 @@ export const DebtManager = () => {
         </div>
       </div>
       
-      <Dialog open={isPlanDialogOpen} onOpenChange={setIsPlanDialogOpen}>
-        <DialogContent dir="rtl">
+      <Dialog open={isInvoiceDialogOpen} onOpenChange={setIsInvoiceDialogOpen}>
+        <DialogContent dir="rtl" className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>خطة السداد المقترحة لـ {selectedDebtorRecord?.debtor_name}</DialogTitle>
+            <DialogTitle>فاتورة دين</DialogTitle>
             <DialogDescription>
-              هذه خطة مقترحة من الذكاء الاصطناعي لمساعدتك في إدارة الدين.
+              هذه فاتورة تم إنشاؤها للدين المحدد.
             </DialogDescription>
           </DialogHeader>
-          {isGeneratingPlan ? (
+          {isGeneratingInvoice ? (
             <div className="flex items-center justify-center p-8">
               <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-              <p className="mr-4">جاري إنشاء الخطة الذكية...</p>
+              <p className="mr-4">جاري إنشاء الفاتورة...</p>
             </div>
-          ) : plan ? (
-            <div className="space-y-4 py-4">
-              <div>
-                <h4 className="font-semibold">المبلغ المقترح للدفعة</h4>
-                <p className="text-2xl font-bold text-primary">{formatNumber(plan.suggestedPaymentAmount)} دينار</p>
+          ) : invoice && selectedDebtorRecord ? (
+            <div className="space-y-4 py-4 border-t border-b p-4 my-4">
+              <div className="flex justify-between items-center">
+                <h3 className="text-lg font-semibold text-primary">فاتورة</h3>
+                <span className="text-sm text-muted-foreground">{invoice.invoiceNumber}</span>
               </div>
-              <div>
-                <h4 className="font-semibold">مدة السداد المقدرة</h4>
-                <p className="text-lg">{plan.paymentDurationInMonths} أشهر</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                    <h4 className="font-semibold text-sm">إلى:</h4>
+                    <p>{selectedDebtorRecord.debtor_name}</p>
+                </div>
+                <div>
+                    <h4 className="font-semibold text-sm">من:</h4>
+                    <p>{user?.displayName}</p>
+                </div>
+                <div>
+                    <h4 className="font-semibold text-sm">تاريخ الإصدار:</h4>
+                    <p>{invoice.issueDate}</p>
+                </div>
+                <div>
+                    <h4 className="font-semibold text-sm">تاريخ الاستحقاق:</h4>
+                    <p>{invoice.dueDate}</p>
+                </div>
               </div>
-              <div>
-                <h4 className="font-semibold">الأساس المنطقي</h4>
-                <p className="text-sm text-muted-foreground">{plan.reasoning}</p>
+              <div className="border-t pt-4">
+                 <div className="flex justify-between items-center font-bold text-lg">
+                    <span>المبلغ الإجمالي</span>
+                    <span className="text-debt-accent">{formatNumber(selectedDebtorRecord.amount)} دينار</span>
+                 </div>
               </div>
+              {invoice.notes && (
+                <div className="pt-4 border-t">
+                  <h4 className="font-semibold text-sm">ملاحظات:</h4>
+                  <p className="text-sm text-muted-foreground">{invoice.notes}</p>
+                </div>
+              )}
             </div>
           ) : (
              <div className="text-center p-8">
-                <p>لم نتمكن من إنشاء خطة. يرجى المحاولة مرة أخرى.</p>
+                <p>لم نتمكن من إنشاء الفاتورة. يرجى المحاولة مرة أخرى.</p>
              </div>
           )}
-          <DialogFooter>
-            <Button onClick={() => setIsPlanDialogOpen(false)}>إغلاق</Button>
+          <DialogFooter className="sm:justify-start">
+            <Button onClick={() => setIsInvoiceDialogOpen(false)} variant="outline">إغلاق</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

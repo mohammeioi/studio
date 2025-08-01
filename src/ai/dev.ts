@@ -1,4 +1,4 @@
 import { config } from 'dotenv';
 config();
 
-import '@/ai/flows/suggest-payment-plan.ts';
+import '@/ai/flows/generate-invoice-flow.ts';
