@@ -661,26 +661,22 @@ export const DebtManager = () => {
               </div>
             ) : invoice && selectedDebtorRecord ? (
               <div ref={invoicePrintRef} className="space-y-4 py-4 border-t border-b p-4 my-4 bg-background text-foreground">
-                <div className="flex justify-between items-center">
+                <div className="flex justify-between items-center mb-4">
                   <h3 className="text-lg font-semibold text-primary">فاتورة</h3>
                   <span className="text-sm text-muted-foreground">{invoice.invoiceNumber}</span>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                      <h4 className="font-semibold text-sm">إلى:</h4>
-                      <p>{selectedDebtorRecord.debtor_name}</p>
+                <div className="flex justify-between items-start text-sm">
+                  <div className="space-y-2">
+                      <h4 className="font-semibold">إلى:</h4>
+                      <p className="text-muted-foreground">{selectedDebtorRecord.debtor_name}</p>
+                      <h4 className="font-semibold pt-2">تاريخ الإصدار:</h4>
+                      <p className="text-muted-foreground">{invoice.issueDate}</p>
                   </div>
-                  <div>
-                      <h4 className="font-semibold text-sm">من:</h4>
-                      <p>{user?.displayName}</p>
-                  </div>
-                  <div>
-                      <h4 className="font-semibold text-sm">تاريخ الإصدار:</h4>
-                      <p>{invoice.issueDate}</p>
-                  </div>
-                  <div>
-                      <h4 className="font-semibold text-sm">تاريخ الاستحقاق:</h4>
-                      <p>{invoice.dueDate}</p>
+                  <div className="space-y-2 text-left">
+                      <h4 className="font-semibold">من:</h4>
+                      <p className="text-muted-foreground">{user?.displayName}</p>
+                      <h4 className="font-semibold pt-2">تاريخ الاستحقاق:</h4>
+                      <p className="text-muted-foreground">{invoice.dueDate}</p>
                   </div>
                 </div>
                 <div className="border-t pt-4 space-y-2">
