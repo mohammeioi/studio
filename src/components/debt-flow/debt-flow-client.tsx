@@ -29,6 +29,7 @@ import { Search, Plus, User as UserIcon, LogOut, LogIn, RefreshCw, X, FileText, 
 import { generateInvoice, GenerateInvoiceOutput } from "@/ai/flows/generate-invoice-flow";
 import { AuthDialog } from "@/components/auth-dialog";
 import { ThemeToggle } from "../theme-toggle";
+import { useReactToPrint } from 'react-to-print';
 
 
 interface DebtRecord {
@@ -76,9 +77,22 @@ export const DebtManager = () => {
     return formatted.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   };
 
-  const handlePrint = () => {
-    window.print();
-  };
+  const handlePrint = useReactToPrint({
+    content: () => invoicePrintRef.current,
+    pageStyle: `
+      @media print {
+        body {
+          color: black;
+          background-color: white;
+        }
+        .printable-content {
+          color: black !important;
+          background-color: white !important;
+        }
+      }
+    `
+  });
+
 
   // --- Auth State & Data Fetching Logic ---
   useEffect(() => {
@@ -610,19 +624,19 @@ export const DebtManager = () => {
       
       <Dialog open={isInvoiceDialogOpen} onOpenChange={setIsInvoiceDialogOpen}>
         <DialogContent dir="rtl" className="sm:max-w-md printable-content">
-          <DialogHeader className="no-print">
+          <DialogHeader>
             <DialogTitle>فاتورة دين</DialogTitle>
             <DialogDescription>
               هذه فاتورة تم إنشاؤها للدين المحدد.
             </DialogDescription>
           </DialogHeader>
           {isGeneratingInvoice ? (
-            <div className="flex items-center justify-center p-8 no-print">
+            <div className="flex items-center justify-center p-8">
               <RefreshCw className="h-8 w-8 animate-spin text-primary" />
               <p className="mr-4">جاري إنشاء الفاتورة...</p>
             </div>
           ) : invoice && selectedDebtorRecord ? (
-            <div ref={invoicePrintRef} className="printable space-y-4 py-4 border-t border-b p-4 my-4">
+            <div ref={invoicePrintRef} className="space-y-4 py-4 border-t border-b p-4 my-4 bg-background text-foreground">
               <div className="flex justify-between items-center">
                 <h3 className="text-lg font-semibold text-primary">فاتورة</h3>
                 <span className="text-sm text-muted-foreground">{invoice.invoiceNumber}</span>
@@ -661,11 +675,11 @@ export const DebtManager = () => {
               </div>
             </div>
           ) : (
-             <div className="text-center p-8 no-print">
+             <div className="text-center p-8">
                 <p>لم نتمكن من إنشاء الفاتورة. يرجى المحاولة مرة أخرى.</p>
              </div>
           )}
-          <DialogFooter className="sm:justify-start no-print">
+          <DialogFooter className="sm:justify-start">
             <Button onClick={() => setIsInvoiceDialogOpen(false)} variant="outline">إغلاق</Button>
             <Button onClick={handlePrint} disabled={isGeneratingInvoice || !invoice}>
               <Printer className="ml-2 h-4 w-4" />
