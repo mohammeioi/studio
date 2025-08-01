@@ -21,7 +21,6 @@ const GenerateInvoiceOutputSchema = z.object({
   invoiceNumber: z.string().describe('A unique invoice number, e.g., INV-001.'),
   issueDate: z.string().describe('The date the invoice was issued, in YYYY-MM-DD format.'),
   dueDate: z.string().describe('The date the payment is due, in YYYY-MM-DD format.'),
-  notes: z.string().describe('A brief, friendly note for the debtor regarding the payment.'),
 });
 export type GenerateInvoiceOutput = z.infer<typeof GenerateInvoiceOutputSchema>;
 
@@ -35,7 +34,7 @@ const generateInvoicePrompt = ai.definePrompt({
   name: 'generateInvoicePrompt',
   input: {schema: GenerateInvoiceInputSchema},
   output: {schema: GenerateInvoiceOutputSchema},
-  prompt: `You are an accounting assistant. Your task is to generate a simple invoice based on the provided details.
+  prompt: `You are an accounting assistant. Your task is to generate simple invoice details based on the provided information.
 
 Creditor Name: {{{creditorName}}}
 Debtor Name: {{{debtorName}}}
@@ -45,7 +44,6 @@ Generate the following invoice details:
 - A unique invoice number (e.g., INV-XXXX where XXXX is a random 4-digit number).
 - The issue date (today's date).
 - The due date (14 days from today's date).
-- A short, professional, and friendly note in Arabic for the debtor, reminding them of the payment.
 
 Current Date: ${new Date().toISOString().split('T')[0]}
 `,

@@ -102,3 +102,17 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+@media print {
+  body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .printable {
+    color: black;
+    background-color: white;
+  }
+  .no-print {
+    display: none;
+  }
+}

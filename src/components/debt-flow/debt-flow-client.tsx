@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { getAuth, onAuthStateChanged, signOut, User } from "firebase/auth";
 import { db, app } from "@/lib/firebase";
 import {
@@ -25,7 +25,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Plus, User as UserIcon, LogOut, LogIn, RefreshCw, X, FileText } from "lucide-react";
+import { Search, Plus, User as UserIcon, LogOut, LogIn, RefreshCw, X, FileText, Printer } from "lucide-react";
 import { generateInvoice, GenerateInvoiceOutput } from "@/ai/flows/generate-invoice-flow";
 import { AuthDialog } from "@/components/auth-dialog";
 import { ThemeToggle } from "../theme-toggle";
@@ -62,16 +62,30 @@ export const DebtManager = () => {
   const [invoice, setInvoice] = useState<GenerateInvoiceOutput | null>(null);
   const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false);
   const [isGeneratingInvoice, setIsGeneratingInvoice] = useState(false);
+  const [lastPayment, setLastPayment] = useState<number | null>(null);
 
   const [localNames, setLocalNames] = useState<LocalName[]>([]);
   const [newLocalName, setNewLocalName] = useState("");
   const [localSearchTerm, setLocalSearchTerm] = useState("");
   const [filteredLocalNames, setFilteredLocalNames] = useState<LocalName[]>([]);
+  const invoicePrintRef = useRef<HTMLDivElement>(null);
 
   // --- Utility Functions ---
   const formatNumber = (num: number): string => {
     const formatted = num % 1 === 0 ? num.toString() : num.toFixed(2);
     return formatted.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  };
+
+  const handlePrint = () => {
+    const printContent = invoicePrintRef.current;
+    if (printContent) {
+      const originalContents = document.body.innerHTML;
+      const printContents = printContent.innerHTML;
+      document.body.innerHTML = printContents;
+      window.print();
+      document.body.innerHTML = originalContents;
+      window.location.reload(); // To restore event listeners
+    }
   };
 
   // --- Auth State & Data Fetching Logic ---
@@ -91,28 +105,27 @@ export const DebtManager = () => {
   // --- Firestore Real-time Listeners ---
   useEffect(() => {
     if (user) {
-      setLoading(true); // Show loader when user logs in and we fetch data
-      
-      const namesQuery = query(collection(db, "users", user.uid, "localNames"));
-      const unsubscribeNames = onSnapshot(namesQuery, (querySnapshot) => {
-        const namesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LocalName));
-        setLocalNames(namesData);
-      }, (error) => {
-        console.error("Error fetching local names from Firestore:", error);
-        toast({ title: "خطأ في الشبكة", description: "فشل تحميل قائمة الأسماء. قد يعمل التطبيق في وضع عدم الاتصال.", variant: "destructive" });
-        setLoading(false);
-      });
+        setLoading(true);
+        const namesQuery = query(collection(db, "users", user.uid, "localNames"));
+        const debtsQuery = query(collection(db, "users", user.uid, "debtRecords"));
 
-      const debtsQuery = query(collection(db, "users", user.uid, "debtRecords"));
-      const unsubscribeDebts = onSnapshot(debtsQuery, (querySnapshot) => {
-        const debtData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DebtRecord));
-        setDebtRecords(debtData.sort((a, b) => b.amount - a.amount));
-        setLoading(false); // Hide loader once debts (main data) are loaded
-      }, (error) => {
-        console.error("Error fetching debt records from Firestore:", error);
-        toast({ title: "خطأ في الشبكة", description: "فشل تحميل سجلات الديون. قد يعمل التطبيق في وضع عدم الاتصال.", variant: "destructive" });
-        setLoading(false);
-      });
+        const unsubscribeNames = onSnapshot(namesQuery, (querySnapshot) => {
+            const namesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LocalName));
+            setLocalNames(namesData);
+        }, (error) => {
+            console.error("Error fetching local names from Firestore:", error);
+            toast({ title: "خطأ في الشبكة", description: "فشل تحميل قائمة الأسماء.", variant: "destructive" });
+        });
+
+        const unsubscribeDebts = onSnapshot(debtsQuery, (querySnapshot) => {
+            const debtData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DebtRecord));
+            setDebtRecords(debtData.sort((a, b) => b.amount - a.amount));
+            setLoading(false);
+        }, (error) => {
+            console.error("Error fetching debt records from Firestore:", error);
+            toast({ title: "خطأ في الشبكة", description: "فشل تحميل سجلات الديون.", variant: "destructive" });
+            setLoading(false);
+        });
       
       return () => {
         unsubscribeNames();
@@ -122,6 +135,7 @@ export const DebtManager = () => {
         // Clear data when user logs out
         setDebtRecords([]);
         setLocalNames([]);
+        fetchDataFromLocalStorage();
     }
   }, [user, toast]);
   
@@ -194,7 +208,6 @@ export const DebtManager = () => {
             await syncLocalDataToFirestore(newUser.uid);
         }
     }
-    // For existing user, the useEffect[user] will handle fetching data from firestore.
   };
 
   const handleLogout = async () => {
@@ -202,7 +215,7 @@ export const DebtManager = () => {
     setDebtorName("");
     setAmount("");
     await signOut(auth);
-    fetchDataFromLocalStorage(); // load local data after logout
+    fetchDataFromLocalStorage();
     toast({ title: "تم تسجيل الخروج بنجاح" });
   };
   
@@ -279,6 +292,12 @@ export const DebtManager = () => {
         const newAmount = existingRecord ? (isPayment ? existingRecord.amount - amountNum : existingRecord.amount + amountNum) : amountNum;
         if (newAmount < 0) throw new Error("مبلغ السداد أكبر من الدين.");
 
+        if(isPayment) {
+            setLastPayment(amountNum);
+        } else {
+            setLastPayment(null);
+        }
+
         const recordId = name; // Use name as ID for simplicity
         const newRecord: DebtRecord = { id: recordId, debtor_name: name, amount: newAmount };
 
@@ -339,7 +358,6 @@ export const DebtManager = () => {
         fetchDataFromLocalStorage();
         toast({ title: "تم تحديث البيانات المحلية."});
     } else {
-      // For logged in user, onSnapshot handles refresh. We can just show a toast.
       toast({ title: "تم التحديث", description: "البيانات السحابية محدثة باستمرار." });
     }
   }, [user]);
@@ -444,7 +462,7 @@ export const DebtManager = () => {
                     </Button>
                     <Button
                       onClick={handleGenerateInvoice}
-                      disabled={!selectedDebtorRecord || isGeneratingInvoice || isSyncing || !user}
+                      disabled={!selectedDebtorRecord || isGeneratingInvoice || isSyncing || !user || !lastPayment}
                       variant="outline"
                       className="w-full py-2 font-semibold border-primary/50 text-primary hover:bg-primary/10"
                     >
@@ -491,6 +509,7 @@ export const DebtManager = () => {
                               setSelectedDebtor(record.debtor_name);
                               setDebtorName(record.debtor_name);
                               setAmount("");
+                              setLastPayment(null);
                             }}
                           >
                             <CardContent className="p-4 text-center">
@@ -611,7 +630,7 @@ export const DebtManager = () => {
               <p className="mr-4">جاري إنشاء الفاتورة...</p>
             </div>
           ) : invoice && selectedDebtorRecord ? (
-            <div className="space-y-4 py-4 border-t border-b p-4 my-4">
+            <div ref={invoicePrintRef} className="printable space-y-4 py-4 border-t border-b p-4 my-4">
               <div className="flex justify-between items-center">
                 <h3 className="text-lg font-semibold text-primary">فاتورة</h3>
                 <span className="text-sm text-muted-foreground">{invoice.invoiceNumber}</span>
@@ -634,26 +653,32 @@ export const DebtManager = () => {
                     <p>{invoice.dueDate}</p>
                 </div>
               </div>
-              <div className="border-t pt-4">
-                 <div className="flex justify-between items-center font-bold text-lg">
+              <div className="border-t pt-4 space-y-2">
+                 <div className="flex justify-between items-center">
                     <span>المبلغ الإجمالي</span>
+                    <span className="font-bold">{formatNumber(selectedDebtorRecord.amount + (lastPayment || 0))} دينار</span>
+                 </div>
+                 <div className="flex justify-between items-center text-success">
+                    <span>المدفوع</span>
+                    <span className="font-bold">{formatNumber(lastPayment || 0)} دينار</span>
+                 </div>
+                 <div className="flex justify-between items-center font-bold text-lg border-t pt-2 mt-2">
+                    <span>المبلغ المتبقي</span>
                     <span className="text-debt-accent">{formatNumber(selectedDebtorRecord.amount)} دينار</span>
                  </div>
               </div>
-              {invoice.notes && (
-                <div className="pt-4 border-t">
-                  <h4 className="font-semibold text-sm">ملاحظات:</h4>
-                  <p className="text-sm text-muted-foreground">{invoice.notes}</p>
-                </div>
-              )}
             </div>
           ) : (
              <div className="text-center p-8">
                 <p>لم نتمكن من إنشاء الفاتورة. يرجى المحاولة مرة أخرى.</p>
              </div>
           )}
-          <DialogFooter className="sm:justify-start">
+          <DialogFooter className="sm:justify-start no-print">
             <Button onClick={() => setIsInvoiceDialogOpen(false)} variant="outline">إغلاق</Button>
+            <Button onClick={handlePrint} disabled={isGeneratingInvoice || !invoice}>
+              <Printer className="ml-2 h-4 w-4" />
+              طباعة
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
