@@ -29,7 +29,6 @@ import { Search, Plus, User as UserIcon, LogOut, LogIn, RefreshCw, X, FileText, 
 import { generateInvoice, GenerateInvoiceOutput } from "@/ai/flows/generate-invoice-flow";
 import { AuthDialog } from "@/components/auth-dialog";
 import { ThemeToggle } from "../theme-toggle";
-import { useReactToPrint } from 'react-to-print';
 
 
 interface DebtRecord {
@@ -77,22 +76,9 @@ export const DebtManager = () => {
     return formatted.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   };
 
-  const handlePrint = useReactToPrint({
-    content: () => invoicePrintRef.current,
-    pageStyle: `
-      @media print {
-        body {
-          color: black;
-          background-color: white;
-        }
-        .printable-content {
-          color: black !important;
-          background-color: white !important;
-        }
-      }
-    `
-  });
-
+  const handlePrint = () => {
+    window.print();
+  };
 
   // --- Auth State & Data Fetching Logic ---
   useEffect(() => {
@@ -630,56 +616,58 @@ export const DebtManager = () => {
               هذه فاتورة تم إنشاؤها للدين المحدد.
             </DialogDescription>
           </DialogHeader>
-          {isGeneratingInvoice ? (
-            <div className="flex items-center justify-center p-8">
-              <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-              <p className="mr-4">جاري إنشاء الفاتورة...</p>
-            </div>
-          ) : invoice && selectedDebtorRecord ? (
-            <div ref={invoicePrintRef} className="space-y-4 py-4 border-t border-b p-4 my-4 bg-background text-foreground">
-              <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold text-primary">فاتورة</h3>
-                <span className="text-sm text-muted-foreground">{invoice.invoiceNumber}</span>
+          <div className="printable-area">
+            {isGeneratingInvoice ? (
+              <div className="flex items-center justify-center p-8">
+                <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+                <p className="mr-4">جاري إنشاء الفاتورة...</p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <h4 className="font-semibold text-sm">إلى:</h4>
-                    <p>{selectedDebtorRecord.debtor_name}</p>
+            ) : invoice && selectedDebtorRecord ? (
+              <div ref={invoicePrintRef} className="space-y-4 py-4 border-t border-b p-4 my-4 bg-background text-foreground">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-lg font-semibold text-primary">فاتورة</h3>
+                  <span className="text-sm text-muted-foreground">{invoice.invoiceNumber}</span>
                 </div>
-                <div>
-                    <h4 className="font-semibold text-sm">من:</h4>
-                    <p>{user?.displayName}</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                      <h4 className="font-semibold text-sm">إلى:</h4>
+                      <p>{selectedDebtorRecord.debtor_name}</p>
+                  </div>
+                  <div>
+                      <h4 className="font-semibold text-sm">من:</h4>
+                      <p>{user?.displayName}</p>
+                  </div>
+                  <div>
+                      <h4 className="font-semibold text-sm">تاريخ الإصدار:</h4>
+                      <p>{invoice.issueDate}</p>
+                  </div>
+                  <div>
+                      <h4 className="font-semibold text-sm">تاريخ الاستحقاق:</h4>
+                      <p>{invoice.dueDate}</p>
+                  </div>
                 </div>
-                <div>
-                    <h4 className="font-semibold text-sm">تاريخ الإصدار:</h4>
-                    <p>{invoice.issueDate}</p>
-                </div>
-                <div>
-                    <h4 className="font-semibold text-sm">تاريخ الاستحقاق:</h4>
-                    <p>{invoice.dueDate}</p>
+                <div className="border-t pt-4 space-y-2">
+                   <div className="flex justify-between items-center">
+                      <span>المبلغ الإجمالي</span>
+                      <span className="font-bold">{formatNumber(selectedDebtorRecord.amount + (lastPayment || 0))} دينار</span>
+                   </div>
+                   <div className="flex justify-between items-center text-success">
+                      <span>المدفوع</span>
+                      <span className="font-bold">{formatNumber(lastPayment || 0)} دينار</span>
+                   </div>
+                   <div className="flex justify-between items-center font-bold text-lg border-t pt-2 mt-2">
+                      <span>المبلغ المتبقي</span>
+                      <span className="text-debt-accent">{formatNumber(selectedDebtorRecord.amount)} دينار</span>
+                   </div>
                 </div>
               </div>
-              <div className="border-t pt-4 space-y-2">
-                 <div className="flex justify-between items-center">
-                    <span>المبلغ الإجمالي</span>
-                    <span className="font-bold">{formatNumber(selectedDebtorRecord.amount + (lastPayment || 0))} دينار</span>
-                 </div>
-                 <div className="flex justify-between items-center text-success">
-                    <span>المدفوع</span>
-                    <span className="font-bold">{formatNumber(lastPayment || 0)} دينار</span>
-                 </div>
-                 <div className="flex justify-between items-center font-bold text-lg border-t pt-2 mt-2">
-                    <span>المبلغ المتبقي</span>
-                    <span className="text-debt-accent">{formatNumber(selectedDebtorRecord.amount)} دينار</span>
-                 </div>
-              </div>
-            </div>
-          ) : (
-             <div className="text-center p-8">
-                <p>لم نتمكن من إنشاء الفاتورة. يرجى المحاولة مرة أخرى.</p>
-             </div>
-          )}
-          <DialogFooter className="sm:justify-start">
+            ) : (
+               <div className="text-center p-8">
+                  <p>لم نتمكن من إنشاء الفاتورة. يرجى المحاولة مرة أخرى.</p>
+               </div>
+            )}
+          </div>
+          <DialogFooter className="sm:justify-start no-print">
             <Button onClick={() => setIsInvoiceDialogOpen(false)} variant="outline">إغلاق</Button>
             <Button onClick={handlePrint} disabled={isGeneratingInvoice || !invoice}>
               <Printer className="ml-2 h-4 w-4" />
