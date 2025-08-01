@@ -13,6 +13,8 @@ import {
     writeBatch,
     query
 } from "firebase/firestore";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,7 +27,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Plus, User as UserIcon, LogOut, LogIn, RefreshCw, X, FileText, Printer } from "lucide-react";
+import { Search, Plus, User as UserIcon, LogOut, LogIn, RefreshCw, X, FileText, Download } from "lucide-react";
 import { generateInvoice, GenerateInvoiceOutput } from "@/ai/flows/generate-invoice-flow";
 import { AuthDialog } from "@/components/auth-dialog";
 import { ThemeToggle } from "../theme-toggle";
@@ -76,9 +78,44 @@ export const DebtManager = () => {
     return formatted.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   };
 
-  const handlePrint = () => {
-    window.print();
+  const handleExportPDF = async () => {
+    const invoiceElement = invoicePrintRef.current;
+    if (!invoiceElement || !invoice) {
+        toast({
+            title: "خطأ",
+            description: "لا يوجد محتوى فاتورة لتصديره.",
+            variant: "destructive",
+        });
+        return;
+    }
+
+    try {
+        const canvas = await html2canvas(invoiceElement, {
+            scale: 2, // Increase resolution
+            useCORS: true,
+            backgroundColor: null, 
+        });
+
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF({
+            orientation: 'portrait',
+            unit: 'pt',
+            format: [canvas.width, canvas.height]
+        });
+
+        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        pdf.save(`invoice-${invoice.invoiceNumber}.pdf`);
+
+    } catch (error) {
+        console.error("Error exporting PDF:", error);
+        toast({
+            title: "فشل التصدير",
+            description: "حدث خطأ أثناء إنشاء ملف PDF.",
+            variant: "destructive",
+        });
+    }
   };
+
 
   // --- Auth State & Data Fetching Logic ---
   useEffect(() => {
@@ -616,7 +653,7 @@ export const DebtManager = () => {
               هذه فاتورة تم إنشاؤها للدين المحدد.
             </DialogDescription>
           </DialogHeader>
-          <div className="printable-area">
+          <div>
             {isGeneratingInvoice ? (
               <div className="flex items-center justify-center p-8">
                 <RefreshCw className="h-8 w-8 animate-spin text-primary" />
@@ -667,11 +704,11 @@ export const DebtManager = () => {
                </div>
             )}
           </div>
-          <DialogFooter className="sm:justify-start no-print">
+          <DialogFooter className="sm:justify-start">
             <Button onClick={() => setIsInvoiceDialogOpen(false)} variant="outline">إغلاق</Button>
-            <Button onClick={handlePrint} disabled={isGeneratingInvoice || !invoice}>
-              <Printer className="ml-2 h-4 w-4" />
-              طباعة
+            <Button onClick={handleExportPDF} disabled={isGeneratingInvoice || !invoice}>
+              <Download className="ml-2 h-4 w-4" />
+              تصدير PDF
             </Button>
           </DialogFooter>
         </DialogContent>
