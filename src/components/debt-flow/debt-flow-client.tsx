@@ -124,21 +124,26 @@ export const DebtManager = () => {
       if (!currentUser) {
         fetchDataFromLocalStorage();
       }
-      // We set loading to false here to quickly show the UI,
-      // the real loading state for data will be handled inside listeners.
       setLoading(false); 
     });
     return () => unsubscribe();
   }, []);
   
-  // --- Firestore Real-time Listeners ---
+  // --- Firestore Real-time Listeners & Data Management ---
   useEffect(() => {
+    let unsubscribeNames = () => {};
+    let unsubscribeDebts = () => {};
+
     if (user) {
         setLoading(true);
+        // Clear local state before fetching from Firestore to ensure cloud data is shown
+        setDebtRecords([]);
+        setLocalNames([]);
+        
         const namesQuery = query(collection(db, "users", user.uid, "localNames"));
         const debtsQuery = query(collection(db, "users", user.uid, "debtRecords"));
 
-        const unsubscribeNames = onSnapshot(namesQuery, (querySnapshot) => {
+        unsubscribeNames = onSnapshot(namesQuery, (querySnapshot) => {
             const namesData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LocalName));
             setLocalNames(namesData);
         }, (error) => {
@@ -146,7 +151,7 @@ export const DebtManager = () => {
             toast({ title: "خطأ في الشبكة", description: "فشل تحميل قائمة الأسماء.", variant: "destructive" });
         });
 
-        const unsubscribeDebts = onSnapshot(debtsQuery, (querySnapshot) => {
+        unsubscribeDebts = onSnapshot(debtsQuery, (querySnapshot) => {
             const debtData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DebtRecord));
             setDebtRecords(debtData.sort((a, b) => b.amount - a.amount));
             setLoading(false);
@@ -156,16 +161,16 @@ export const DebtManager = () => {
             setLoading(false);
         });
       
-      return () => {
-        unsubscribeNames();
-        unsubscribeDebts();
-      };
     } else {
-        // Clear data when user logs out
-        setDebtRecords([]);
-        setLocalNames([]);
+        // User is logged out, fetch from local storage
         fetchDataFromLocalStorage();
     }
+    
+    // Cleanup function to unsubscribe from listeners when component unmounts or user changes
+    return () => {
+      unsubscribeNames();
+      unsubscribeDebts();
+    };
   }, [user, toast]);
   
 
@@ -244,7 +249,7 @@ export const DebtManager = () => {
     setDebtorName("");
     setAmount("");
     await signOut(auth);
-    fetchDataFromLocalStorage();
+    // The useEffect hook for `user` will handle fetching local data
     toast({ title: "تم تسجيل الخروج بنجاح" });
   };
   
@@ -391,7 +396,7 @@ export const DebtManager = () => {
     }
   }, [user, toast]);
 
-  if (loading) {
+  if (loading && !user) { // Only show full-screen loader on initial anonymous load
     return (
         <div className="flex flex-col items-center justify-center min-h-screen bg-background">
             <RefreshCw className="h-12 w-12 animate-spin text-primary" />
@@ -518,10 +523,10 @@ export const DebtManager = () => {
                     className="pr-10"
                   />
                 </div>
-                {isSyncing ? (
+                {loading && user ? (
                     <div className="text-center py-8">
                         <RefreshCw className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
-                        <p className="mt-2 text-muted-foreground">جاري المزامنة...</p>
+                        <p className="mt-2 text-muted-foreground">جاري مزامنة البيانات السحابية...</p>
                     </div>
                 ) : (
                   <div className="max-h-40 overflow-y-auto p-2 border rounded-lg bg-background/50 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
